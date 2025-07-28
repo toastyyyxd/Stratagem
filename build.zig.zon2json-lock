@@ -1,0 +1,32 @@
+{
+  "raylib_zig-5.6.0-dev-KE8REM0tBQAHVn9Xjqlgu9l1qgfTmP8aJa1kLhD584bV": {
+    "name": "raylib_zig",
+    "url": "git+https://github.com/Not-Nik/raylib-zig?ref=devel#5013830647196ba938a3a25a36b8245606e9a9cd",
+    "hash": "sha256-W5u8q+g1DgAr2ZgnLTla5fCkFuWpcS2ZsGbgml8RvNg=",
+    "rev": "5013830647196ba938a3a25a36b8245606e9a9cd"
+  },
+  "raylib-5.5.0-whq8uExcNgQBBys4-PIIEqPuWO-MpfOJkwiM4Q1nLXVN": {
+    "name": "raylib",
+    "url": "git+https://github.com/raysan5/raylib?ref=master#bdda18656b301303b711785db48ac311655bb3d9",
+    "hash": "sha256-yxaKGuEP4/GHHi8wQ58BDhqqle+3k+XLSCkv1ubClSQ=",
+    "rev": "bdda18656b301303b711785db48ac311655bb3d9"
+  },
+  "N-V-__8AABHMqAWYuRdIlflwi8gksPnlUMQBiSxAqQAAZFms": {
+    "name": "xcode_frameworks",
+    "url": "git+https://github.com/hexops/xcode-frameworks#9a45f3ac977fd25dff77e58c6de1870b6808c4a7",
+    "hash": "sha256-xveFYoQu0BT+ZtEsyca/zdQ/so9jPK56SeX3xmF3iro=",
+    "rev": "9a45f3ac977fd25dff77e58c6de1870b6808c4a7"
+  },
+  "N-V-__8AAJl1DwBezhYo_VE6f53mPVm00R-Fk28NPW7P14EQ": {
+    "name": "emsdk",
+    "url": "git+https://github.com/emscripten-core/emsdk#4.0.9",
+    "hash": "sha256-ftUQjgMio8G3aHIux9ZckJFYq1Vdfkv5w3830XO1Ris=",
+    "rev": "3bcf1dcd01f040f370e10fe673a092d9ed79ebb5"
+  },
+  "N-V-__8AAEp9UgBJ2n1eks3_3YZk3GCO1XOENazWaCO7ggM2": {
+    "name": "raygui",
+    "url": "git+https://github.com/raysan5/raygui#1536ae35c7b42d863135f4181fd2a225e531f68b",
+    "hash": "sha256-p33HJcYZuaUV1w4iUqcfNj/mtB1ULcdBI0+pK0U0t3E=",
+    "rev": "1536ae35c7b42d863135f4181fd2a225e531f68b"
+  }
+}
