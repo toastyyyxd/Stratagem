@@ -2,61 +2,27 @@ const std = @import("std");
 const allocator = @import("./allocator.zig");
 const OptionalU32 = @import("./unmanaged_optional.zig").OptionalU32;
 const Optional = @import("./unmanaged_optional.zig").Optional;
-pub const BlockSize = 64;
+const xev = @import("../main.zig").xev;
+const loop = @import("../main.zig").get_loop();
+const thread_pool = @import("../main.zig").get_thread_pool();
+
 pub const SlabSize = 16 * 1024; // 16kb per slab
-pub const SlabHeaderSize = 64; // 64 bytes for the slab header, same as Block size for alignment
-pub const BlocksPerSlab = (SlabSize - SlabHeaderSize) / BlockSize; // expected 255 blocks per slab
 
-pub const BlockOrientation = enum(u2) {
-    North,
-    East,
-    South,
-    West,
-    pub fn rotateClockwise(self: BlockOrientation) BlockOrientation {
-        return @enumFromInt(@as(u2, @intFromEnum(self)) +% 1);
-    }
-    pub fn rotateCounterClockwise(self: BlockOrientation) BlockOrientation {
-        return @enumFromInt(@as(u2, @intFromEnum(self)) -% 1);
-    }
-};
+pub const Slab = [SlabSize]u8;
 
-pub const Block = struct {
-    kind: u16, // e.g. collider, armor, engine, etc.
-    health: f16,
-    local_pos: [2]i16,
-    orientation: BlockOrientation,
-    // Padding to align to 64 bytes
-    _pad: [BlockSize - @sizeOf(u16) - @sizeOf(f16) - @sizeOf([2]i16) - @sizeOf(BlockOrientation)]u8,
-};
-
-pub const Slab = struct {
-    ship_id: u32,
-    used_blocks: u8, // max 255 blocks used, -1 for header (this struct)
-    block_bitmap: [32]u8 = [_]u8{0} ** 32, // Block allocation bitmap: 255 bits (32 bytes, fits in header padding)
-    // Remaining padding to align to header size
-    _pad: [SlabHeaderSize - @sizeOf(u32) - @sizeOf(u8) - @sizeOf([32]u8)]u8,
-
-    blocks: [BlocksPerSlab]Block,
-
-    /// Set block as allocated
-    pub fn setBlockUsed(self: *Slab, idx: usize) void {
-        self.block_bitmap[idx / 8] |= @as(u8, 1) << @intCast(idx % 8);
-    }
-    /// Set block as free
-    pub fn setBlockFree(self: *Slab, idx: usize) void {
-        self.block_bitmap[idx / 8] &= ~(@as(u8, 1) << @intCast(idx % 8));
-    }
-    /// Check if block is used
-    pub fn isBlockUsed(self: *Slab, idx: usize) bool {
-        return (self.block_bitmap[idx / 8] & (@as(u8, 1) << @intCast(idx % 8))) != 0;
-    }
-};
-
-pub const BlockHeap = struct {
+/// The core heap for fast, multithreaded allocation of memory.
+/// It is a fixed-size slab allocator that uses a virtual memory region to prevent ext fragmentation.
+/// Allocations are always batched and return a xev.Completion to start the allocation.
+pub const CoreHeap = struct {
     ptr: *u8,
     reserved_byte_len: usize,
     capacity_state: std.atomic.Value(CapacityState),
-    migrating: std.atomic.Value(bool),
+    /// State of the grow state machine. Also used to track if a grow is in progress.
+    grow_state: std.atomic.Value(?Grow),
+    /// Tracks how many slabs are queued for growth while the first grow is in progress.
+    grow_deficit: std.atomic.Value(u32),
+    /// The threshold for when to grow the heap, in n/100 percentage of free slabs remaining.
+    free_grow_threshold: u8,
 
     const CapacityState = packed struct {
         last_capacity: u32,
@@ -98,34 +64,35 @@ pub const BlockHeap = struct {
         std.debug.panic("Invalid field requested: index {}", .{@intFromEnum(field)});
     }
     fn fieldRange(ptr: *const u8, cap_state: *const CapacityState, field: Field) []u8 {
-        const start = BlockHeap.fieldOffset(cap_state, field);
+        const start = CoreHeap.fieldOffset(cap_state, field);
         const next_field = @as(Field, @enumFromInt(@intFromEnum(field) + 1));
-        const end = BlockHeap.fieldOffset(cap_state, next_field);
+        const end = CoreHeap.fieldOffset(cap_state, next_field);
         return @as([*]u8, @constCast(@alignCast(@ptrCast(ptr))))[start..end];
     }
 
-    pub fn init(target_capacity: u32, target_reserved_capacity: u32) !BlockHeap {
+    pub fn init(target_capacity: u32, target_reserved_capacity: u32, free_grow_threshold: u8) !CoreHeap {
         const capacity = try std.math.ceilPowerOfTwo(u32, target_capacity);
         const reserved_capacity = try std.math.ceilPowerOfTwo(u32, target_reserved_capacity);
         const max_cap_state = CapacityState{
             .capacity = reserved_capacity,
             .last_capacity = capacity,
         };
-        const reserved_byte_len = std.mem.alignForward(usize, BlockHeap.fieldOffset(&max_cap_state, .EndByte), allocator.page_size);
+        const reserved_byte_len = std.mem.alignForward(usize, CoreHeap.fieldOffset(&max_cap_state, .EndByte), allocator.page_size);
         const ptr = try allocator.reserveVirtualRegion(reserved_byte_len);
-        var heap = BlockHeap{
+        var heap = CoreHeap{
             .ptr = ptr,
             .reserved_byte_len = reserved_byte_len,
             .capacity_state = std.atomic.Value(CapacityState).init(CapacityState{
                 .capacity = capacity,
                 .last_capacity = capacity,
+                .free_grow_threshold = free_grow_threshold,
             }),
-            .migrating = std.atomic.Value(bool).init(false),
+            .grow_state = std.atomic.Value(bool).init(false),
         };
         heap.initHeader();
         return heap;
     }
-    fn initHeader(self: *BlockHeap) void {
+    fn initHeader(self: *CoreHeap) void {
         const cap_state = self.capacity_state.load(.acquire);
         const headerStart = fieldOffset(&cap_state, .FreeSlabIndicesLen);
         const headerEnd = fieldOffset(&cap_state, .EndByte);
@@ -138,20 +105,63 @@ pub const BlockHeap = struct {
         // Set the lengths of the free array, no need to use atomics here since this is the initialization phase
         @as(*u32, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).* = cap_state.getCurrent();
     }
-    pub fn deinit(self: *BlockHeap) !void {
+    pub fn deinit(self: *CoreHeap) !void {
         try allocator.releaseVirtualRegion(self.ptr, self.reserved_byte_len);
     }
 
-    pub fn allocateSlab(self: *BlockHeap) !*Slab {
+    /// This not a full state machine.
+    const Grow = struct {
+        state: GrowState,
+        heap: *CoreHeap,
+        new_capacity: u32,
+    };
+    fn growCompletion(state: *Grow, _: *xev.Sys.Loop, _: *xev.Sys.Completion, _: xev.Sys.Result) xev.CallbackAction {
+        const self = state.heap;
+        self.grow(state.new_capacity) catch |err| {
+            std.debug.panic("Failed to grow heap: {}", .{err});
+            unreachable;
+        };
+        return .disarm;
+    }
+    fn resumeAllocate(state: *AllocationState, _: *xev.Sys.Loop, _: *xev.Sys.Completion, _: xev.Sys.Result) xev.CallbackAction {
+        const self = state.heap;
+        const cap_state = self.capacity_state.load(.acquire);
+        const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchSub(state.n_slabs, .acq_rel);
+        const target_indices = @as([]u32, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndices))))[free_indices_len - state.n_slabs .. free_indices_len];
+        const slabs = @as([]Slab, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .Slabs))))[target_indices..];
+        //std.debug.print("Allocating Slab ptr: {*}, Index: {}\n", .{ slab, free_indice });
+        state.slabs = slabs;
+        return .disarm;
+    }
+
+    pub fn allocateSlabBatch(self: *CoreHeap, n_slabs: u32) ![]Slab {
+        const cap_state = self.capacity_state.load(.acquire);
+        const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchSub(n_slabs, .acq_rel);
+        if (free_indices_len * 100 <= cap_state.getCurrent() * self.free_grow_threshold) {
+            @branchHint(.unlikely);
+            const c = xev.Sys.Completion{
+                .callback = *self.growCompletion,
+                .userdata = &Grow{
+                    .heap = self,
+                    .new_capacity = cap_state.getCurrent() + n_slabs,
+                },
+            };
+            return c;
+        } else {
+            @branchHint(.likely);
+            unreachable; // TODO: ahh
+        }
+    }
+
+    pub fn allocateSlab(self: *CoreHeap) !*Slab {
         const cap_state = self.capacity_state.load(.acquire);
         const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchSub(1, .acq_rel);
         const free_indice = @as([]u32, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndices))))[free_indices_len - 1];
         const slab = &@as([]Slab, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .Slabs))))[free_indice];
-        @memset(@as([]u8, @alignCast(@ptrCast(slab)))[0..SlabHeaderSize], 0);
         //std.debug.print("Allocating Slab ptr: {*}, Index: {}\n", .{ slab, free_indice });
         return slab;
     }
-    pub fn deallocateSlab(self: *BlockHeap, slab: *Slab) !void {
+    pub fn deallocateSlab(self: *CoreHeap, slab: *Slab) !void {
         const cap_state = self.capacity_state.load(.acquire);
         const slab_index = @as(u32, @truncate((@as(usize, @intFromPtr(slab)) - @as(usize, @intFromPtr(self.ptr))) / SlabSize));
         const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchAdd(1, .acq_rel);
@@ -159,9 +169,9 @@ pub const BlockHeap = struct {
         //std.debug.print("Deallocating Slab ptr: {*}, Index: {}\n", .{ slab, slab_index });
     }
 
-    pub fn grow(self: *BlockHeap, new_target_capacity: u32) !void {
-        if (self.migrating.cmpxchgStrong(false, true, .acq_rel, .acquire) == true) return error.MigrationInProgress;
-        defer self.migrating.store(false, .release); // Ensure we reset the migrating state on exit.
+    pub fn grow(self: *CoreHeap, new_target_capacity: u32) !void {
+        if (self.grow_state.cmpxchgStrong(false, true, .acq_rel, .acquire) == true) return error.MigrationInProgress;
+        defer self.grow_state.store(false, .release); // Ensure we reset the migrating state on exit.
 
         const old_cap_state = self.capacity_state.load(.acquire);
         const new_capacity = try std.math.ceilPowerOfTwo(u32, new_target_capacity);

@@ -40,6 +40,10 @@
             .url = "git+https://github.com/toastyyyxd/raylib-zig#4874aa2598ad1d8e2be1d2996c280eae2aa9fb1d",
             .hash = "raylib_zig-5.6.0-dev-KE8REMAuBQDd7FzorNpfNeB8ptFE1dM_d9jdo69NFFQR",
         },
+        .libxev = .{
+            .url = "git+https://github.com/mitchellh/libxev#9f785d202ddccf7a625e799250579253977978b6",
+            .hash = "libxev-0.0.0-86vtcx8dEwDfl6p4tGVxCygft8oOsggfba9JO-k28J2x",
+        },
     },
     .paths = .{
         "build.zig",
