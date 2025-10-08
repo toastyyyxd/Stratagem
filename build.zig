@@ -15,10 +15,10 @@ pub fn build(b: *std.Build) void {
         .root_module = main_mod,
     });
 
-    // Development vs Release configuration
-    const is_dev = optimize != .ReleaseSafe and optimize != .ReleaseFast;
     const options = b.addOptions();
+    const is_dev = optimize != .ReleaseSafe and optimize != .ReleaseFast;
     options.addOption(bool, "is_dev", is_dev);
+    options.addOption(bool, "test_logs", b.option(bool, "testLogs", "enable logging in tests") orelse false);
     const options_module = options.createModule();
     exe.root_module.addImport("build_options", options_module);
 
@@ -50,15 +50,17 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Test step
-    const test_artifact = b.addTest(.{ .name = "Tests", .root_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/tests.zig"),
-    }) });
+    const test_artifact = b.addTest(.{
+        .name = "Tests",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize, .root_source_file = b.path("src/tests.zig"), .imports = &.{std.Build.Module.Import{ .name = "build_options", .module = options_module }} }),
+    });
     const test_cmd = b.addRunArtifact(test_artifact);
+    b.installArtifact(test_artifact);
+
     if (b.args) |args| {
         test_cmd.addArgs(args);
     }
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&test_cmd.step);
 }

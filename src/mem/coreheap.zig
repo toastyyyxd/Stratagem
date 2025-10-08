@@ -3,8 +3,8 @@ const allocator = @import("./allocator.zig");
 const OptionalU32 = @import("./unmanaged_optional.zig").OptionalU32;
 const Optional = @import("./unmanaged_optional.zig").Optional;
 const xev = @import("../main.zig").xev;
-const loop = @import("../main.zig").get_loop();
-const thread_pool = @import("../main.zig").get_thread_pool();
+const loop = @import("../scheduling.zig").get_loop();
+const thread_pool = @import("../scheduling.zig").get_thread_pool();
 
 pub const SlabSize = 16 * 1024; // 16kb per slab
 
@@ -13,18 +13,23 @@ pub const Slab = [SlabSize]u8;
 /// The core heap for fast, multithreaded allocation of memory.
 /// It is a fixed-size slab allocator that uses a virtual memory region to prevent ext fragmentation.
 /// Allocations are always batched and return a xev.Completion to start the allocation.
+///
+/// Grows are done with double-buffered headers, where the old header is used until the new header is initialized.
+/// Then, activity is switched to the new header. The old header is then copied over to the new header,
+/// and the old header is freed.
 pub const CoreHeap = struct {
     ptr: *u8,
     reserved_byte_len: usize,
+    /// The current and last capacity of the heap, last capacity is used for growing.
     capacity_state: std.atomic.Value(CapacityState),
-    /// State of the grow state machine. Also used to track if a grow is in progress.
-    grow_state: std.atomic.Value(?Grow),
-    /// Tracks how many slabs are queued for growth while the first grow is in progress.
-    grow_deficit: std.atomic.Value(u32),
-    /// The threshold for when to grow the heap, in n/100 percentage of free slabs remaining.
-    free_grow_threshold: u8,
+    /// 0 if no grow is in progress, a non-zero value is the target capacity of the ongoing grow.
+    grow_state: std.atomic.Value(Optional(GrowState)),
+    /// Tracks how many slabs are queued for growth while the previous grow is in progress.
+    wanted_capacity: std.atomic.Value(u32),
+    /// Use by: `(wanted_capacity * self.threshold_scale_factor) >> 8`
+    threshold_scale_factor: u8,
 
-    const CapacityState = packed struct {
+    const CapacityState = struct {
         last_capacity: u32,
         capacity: u32,
         pub fn getCurrent(self: *const CapacityState) u32 {
@@ -40,6 +45,12 @@ pub const CoreHeap = struct {
             };
         }
     };
+    const GrowState = struct {
+        target_capacity: u32,
+        is_done: bool,
+        completion: *xev.Sys.Completion,
+    };
+
     const Field = enum {
         Slabs, // Slab
         FreeSlabIndicesLen, // u32 (atomic)
@@ -47,7 +58,7 @@ pub const CoreHeap = struct {
         EndByte, // This is not a field, just a marker for the end of the buffer
     };
 
-    fn fieldOffset(cap_state: *const CapacityState, field: Field) usize {
+    fn fieldOffset(cap_state: *const CapacityState, comptime field: Field) usize {
         var offset: usize = 0;
         offset = std.mem.alignForward(usize, offset, @alignOf(Slab));
         if (field == .Slabs) return offset;
@@ -63,7 +74,7 @@ pub const CoreHeap = struct {
         if (field == .EndByte) return offset;
         std.debug.panic("Invalid field requested: index {}", .{@intFromEnum(field)});
     }
-    fn fieldRange(ptr: *const u8, cap_state: *const CapacityState, field: Field) []u8 {
+    fn fieldRange(ptr: *const u8, cap_state: *const CapacityState, field: comptime Field) []u8 {
         const start = CoreHeap.fieldOffset(cap_state, field);
         const next_field = @as(Field, @enumFromInt(@intFromEnum(field) + 1));
         const end = CoreHeap.fieldOffset(cap_state, next_field);
@@ -85,7 +96,7 @@ pub const CoreHeap = struct {
             .capacity_state = std.atomic.Value(CapacityState).init(CapacityState{
                 .capacity = capacity,
                 .last_capacity = capacity,
-                .free_grow_threshold = free_grow_threshold,
+                .threshold_grow_factor = (100 * 256) / (100 - free_grow_threshold),
             }),
             .grow_state = std.atomic.Value(bool).init(false),
         };
@@ -109,47 +120,60 @@ pub const CoreHeap = struct {
         try allocator.releaseVirtualRegion(self.ptr, self.reserved_byte_len);
     }
 
-    /// This not a full state machine.
-    const Grow = struct {
-        state: GrowState,
-        heap: *CoreHeap,
-        new_capacity: u32,
+    const Allocation = union(enum) {
+        Slabs: []Slab,
+        Completion: *xev.Completion,
     };
-    fn growCompletion(state: *Grow, _: *xev.Sys.Loop, _: *xev.Sys.Completion, _: xev.Sys.Result) xev.CallbackAction {
-        const self = state.heap;
-        self.grow(state.new_capacity) catch |err| {
-            std.debug.panic("Failed to grow heap: {}", .{err});
-            unreachable;
-        };
-        return .disarm;
-    }
-    fn resumeAllocate(state: *AllocationState, _: *xev.Sys.Loop, _: *xev.Sys.Completion, _: xev.Sys.Result) xev.CallbackAction {
-        const self = state.heap;
+    /// Allocates a batch of slabs.
+    ///
+    /// We track the following state:
+    /// - Capacity.
+    /// - The final capacity of the ongoing grow. (Future)
+    /// - The total wanted capacity, including current and deficit. (Required)
+    /// i.e. Future ~ Required > Capacity.
+    /// A first-class grow is called if Capacity is below Required, and there is none ongoing.
+    /// A second-class grow is called if Future is below Required, aka there is ongoing.
+    ///
+    /// A first-class grow is activated immediately.
+    /// A second-class grow is activated/upgraded when the ongoing grow is completed.
+    ///
+    /// Only one grow can be ongoing at a time.
+    pub fn allocateSlabBatch(self: *CoreHeap, n_slabs: u32) Allocation {
+        // Cases:
+        // - Current capacity is enough, allocate slabs. (most likely)
+        // - Current capacity is enough, but threshold is not met, allocate slabs and grow in the background. (likely)
+        // - Current capacity is not enough, trigger a grow. (rare)
+        // - Current capacity is not enough, grow is already ongoing, target capacity is not enough either, update the wanted, it will trigger a grow. (very rare)
         const cap_state = self.capacity_state.load(.acquire);
-        const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchSub(state.n_slabs, .acq_rel);
-        const target_indices = @as([]u32, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndices))))[free_indices_len - state.n_slabs .. free_indices_len];
-        const slabs = @as([]Slab, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .Slabs))))[target_indices..];
-        //std.debug.print("Allocating Slab ptr: {*}, Index: {}\n", .{ slab, free_indice });
-        state.slabs = slabs;
-        return .disarm;
-    }
+        const current_capacity = cap_state.getCurrent();
+        const free_slab_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).load(.acquire);
+        const wanted_capacity = self.wanted_capacity.fetchAdd(n_slabs, .acq_rel) + n_slabs;
+        var a: Allocation = undefined;
+        const threshold_minimum_capacity = (wanted_capacity * self.threshold_scale_factor) >> 8;
+        if (current_capacity >= wanted_capacity) {
+            const slabs = @as([]Slab, @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .Slabs))));
+            const start_index = current_capacity - n_slabs;
+            const end_index = current_capacity;
+            // Update the capacity state to reflect the new allocation.
+            self.capacity_state.store(cap_state.iterateNew(current_capacity + n_slabs), .release);
+            // Return the allocated slabs.
+            a = .{ .Slabs = slabs[start_index..end_index] };
 
-    pub fn allocateSlabBatch(self: *CoreHeap, n_slabs: u32) ![]Slab {
-        const cap_state = self.capacity_state.load(.acquire);
-        const free_indices_len = @as(*std.atomic.Value(u32), @alignCast(@ptrCast(fieldRange(self.ptr, &cap_state, .FreeSlabIndicesLen)))).fetchSub(n_slabs, .acq_rel);
-        if (free_indices_len * 100 <= cap_state.getCurrent() * self.free_grow_threshold) {
-            @branchHint(.unlikely);
-            const c = xev.Sys.Completion{
-                .callback = *self.growCompletion,
-                .userdata = &Grow{
-                    .heap = self,
-                    .new_capacity = cap_state.getCurrent() + n_slabs,
-                },
-            };
-            return c;
+            // Check if the new allocation triggers the threshold, if so, trigger a grow in the background.
+            if (current_capacity < threshold_minimum_capacity) {
+                // TODO
+            }
+            return a;
         } else {
-            @branchHint(.likely);
-            unreachable; // TODO: ahh
+            // Current capacity is not enough, we need to grow and return a completion.
+            const grow_state = self.grow_state.load(.acquire);
+            if (grow_state.is_some) {
+                // a grow is already in progress, we return the current completion.
+                return grow_state.unwrap().completion;
+            } else {
+                // TODO
+                thread_pool.schedule(.from(xev.ThreadPool.Task{.}))
+            }
         }
     }
 
@@ -169,10 +193,9 @@ pub const CoreHeap = struct {
         //std.debug.print("Deallocating Slab ptr: {*}, Index: {}\n", .{ slab, slab_index });
     }
 
-    pub fn grow(self: *CoreHeap, new_target_capacity: u32) !void {
-        if (self.grow_state.cmpxchgStrong(false, true, .acq_rel, .acquire) == true) return error.MigrationInProgress;
-        defer self.grow_state.store(false, .release); // Ensure we reset the migrating state on exit.
-
+    /// Grows the heap to the new target capacity.
+    /// UNSAFE: This does not check if a grow is already in progress, callers must handle that.
+    fn grow(self: *CoreHeap, new_target_capacity: u32) !void {
         const old_cap_state = self.capacity_state.load(.acquire);
         const new_capacity = try std.math.ceilPowerOfTwo(u32, new_target_capacity);
         const new_cap_state = old_cap_state.iterateNew(new_capacity);
