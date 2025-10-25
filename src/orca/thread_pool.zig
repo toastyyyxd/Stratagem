@@ -13,11 +13,11 @@ const Job = struct {
     ctx: *anyopaque,
     /// The function to be called when the job is ready to be processed.
     /// Usually a method of the FSM in .ctx.
-    tick: fn (*anyopaque, *Thread) void,
+    tick: *fn (*anyopaque, *Thread) void,
     /// The intensity of the job, used for job distribution.
     /// Takes priority over the ring buffer capacity.
     intensity: u8,
-}; // J*b, a derogatory slur for the unempl*yed, use with caution.
+};
 
 const Config = struct {
     max_thread_count: u16,
@@ -30,20 +30,16 @@ const Config = struct {
 const Thread = struct {
     const Self = @This();
 
-    const Active = enum {
+    const Active = enum(u8) {
         /// Thread is either waking up, actively processing jobs and has space in queue, or spinning for jobs.
         Running,
         /// Thread is either setting up to wait for the futex, or already waiting.
         Idle,
     };
-    const State = packed struct {
-        active: Active,
-        _padding1: [@sizeOf(u32) - @sizeOf(Active)]u8 = undefined, // pad to u32
-        idle_futex_word: u32,
-        saturation: u32,
-        _padding2: [std.atomic.cache_line - (@sizeOf(u32) * 3)]u8 = undefined,
-    };
-    state: State align(std.atomic.cache_line),
+    active: std.atomic.Value(Active) align(std.atomic.cache_line),
+    should_exit: std.atomic.Value(bool) align(std.atomic.cache_line),
+    idle_futex_word: std.atomic.Value(u32) align(std.atomic.cache_line),
+    saturation: u32 align(std.atomic.cache_line),
 
     parent: *ThreadPool,
 
@@ -58,7 +54,7 @@ const Thread = struct {
         return offset;
     }
     inline fn sizeOf(config: *const Config) usize {
-        return @sizeOf(Self) + offsetQueue() + Queue.sizeOf(config.worker_queue_capacity);
+        return offsetQueue() + Queue.sizeOf(config.worker_queue_capacity);
     }
     inline fn alignOf() usize {
         return comptime @max(@alignOf(Self), @alignOf(std.Thread), Queue.alignOf());
@@ -71,33 +67,47 @@ const Thread = struct {
     }
 
     pub fn work(self: *Self) void {
-        @atomicStore(Self.Active, &self.state.active, .Active, .release);
-        var jobs = [16]Job{};
+        self.active.store(.Running, .release);
+        var jobs: [16]Job = undefined;
         var wait_count: u32 = 0;
-        while (true) {
-            const len = self.getQueue().pop_some(jobs);
+        while (self.should_exit.load(.acquire) == false) {
+            const len = self.getQueue().pop_some(&jobs);
             if (len > 0) {
                 for (jobs[0..len]) |job| {
                     job.tick(job.ctx, self);
                     wait_count = 0;
-                    self.state.saturation -|= job.intensity; // Can avoid atomics since it is only accessed by this thread and in one cache line.
+                    self.saturation -|= job.intensity; // Can avoid atomics since it is only accessed by this thread and in one cache line.
                 }
             } else {
-                if (wait_count < 32) {
+                if (wait_count < 64) {
                     std.atomic.spinLoopHint();
                 } else if (wait_count < 256) {
-                    std.Thread.yield() catch std.debug.print("Thread failed to yield\n");
+                    std.Thread.yield() catch std.debug.print("Thread failed to yield!\n", .{});
                 } else {
-                    @atomicStore(u32, &self.state.idle_futex_word, 1, .release);
-                    std.Thread.Futex.wait(&self.state.idle_futex_word, 1);
-                    while (@atomicLoad(u32, &self.state.idle_futex_word, .acquire) != 0) {
-                        std.Thread.Futex.wait(&self.state.idle_futex_word, 1);
+                    self.active.store(.Idle, .release);
+                    if (self.should_exit.load(.acquire)) break; // Check exit condition again before sleeping
+                    // Publish "waiting" and consume any pending signal in one op.
+                    const prev =
+                        self.idle_futex_word.swap(0, .acq_rel);
+                    if (prev == 0) {
+                        // handle spurious wakeups
+                        while (self.idle_futex_word.load(.acquire) == 0) {
+                            std.Thread.Futex.wait(&self.idle_futex_word, 0);
+                        }
                     }
+                    wait_count = 0;
+                    self.active.store(.Running, .release);
                 }
                 wait_count +|= 1;
             }
-            @atomicStore(u32, &self.state.saturation, self.state.saturation, .release); // Publish saturation
+            @atomicStore(u32, &self.saturation, self.saturation, .release); // Publish saturation
         }
+        std.debug.print("Thread exiting.\n", .{});
+    }
+
+    pub fn wake(self: *Self) void {
+        self.idle_futex_word.store(1, .release);
+        std.Thread.Futex.wake(&self.idle_futex_word, 1);
     }
 
     /// Enqueue jobs locally, or round-robin to other threads.
@@ -107,7 +117,7 @@ const Thread = struct {
             const local_count = self.getQueue().push_some(jobs);
             if (local_count > job_count) return; // All jobs were enqueued locally
         }
-        const thread_count = @as(u64, @intCast(self.parent.thread_count.value.load(.acquire)));
+        const thread_count = @as(u64, @intCast(self.parent.thread_count.load(.acquire)));
         if (jobs.len >= thread_count) {}
     }
 };
@@ -116,10 +126,7 @@ pub const ThreadPool = struct {
     const Self = @This();
 
     config: Config,
-    thread_count: struct {
-        value: std.atomic.Value(u16),
-        _padding: [std.atomic.cache_line - @sizeOf(std.atomic.Value(u16))]u8 = undefined,
-    } align(std.atomic.cache_line),
+    thread_count: std.atomic.Value(u16) align(std.atomic.cache_line),
 
     inline fn offsetBumpAllocator() usize {
         var offset: usize = @sizeOf(Self);
@@ -165,7 +172,7 @@ pub const ThreadPool = struct {
         return @ptrFromInt(@intFromPtr(self) + offsetAllocInterface());
     }
     pub inline fn getStackRegion(self: *Self) []u8 {
-        return @as(*u8, @ptrFromInt(@intFromPtr(self) + offsetStackRegion(&self.config)))[0 .. self.config.stack_size * self.config.thread_count];
+        return @as(*u8, @ptrFromInt(@intFromPtr(self) + offsetStackRegion(&self.config)))[0 .. self.config.stack_size * self.config.max_thread_count];
     }
     pub inline fn getThread(self: *Self, thread_index: u16) *Thread {
         return @ptrFromInt(@intFromPtr(self) + offsetThread(&self.config, thread_index));
@@ -181,6 +188,7 @@ pub const ThreadPool = struct {
 
         // Initialize Self
         self.config = config;
+        self.thread_count = .init(0);
         self.getFba().* = InplaceBufferAllocator.init(@ptrFromInt(@intFromPtr(self) + offsetStackRegion(&config)), config.stack_size * init_thread_count);
         self.getFbaInterface().* = self.getFba().threadSafeAllocator();
 
@@ -190,25 +198,26 @@ pub const ThreadPool = struct {
             const queue = thread.getQueue();
             _ = try Queue.initAtPtr(@ptrCast(queue), config.worker_queue_capacity);
             thread.parent = self;
-            @atomicStore(Thread.State, &thread.state, .{
-                .active = .Idle,
-                .saturation = 0,
-            }, .release);
+            thread.should_exit = .init(false);
+            thread.idle_futex_word = .init(1);
+            thread.active = .init(.Idle);
+            thread.saturation = 0;
             // Spawn the thread, passing the queue as an argument
+            _ = self.thread_count.fetchAdd(1, .seq_cst);
             thread.getInternal().* = try std.Thread.spawn(.{
                 .allocator = self.getFbaInterface().*,
                 .stack_size = config.stack_size,
-            }, thread.work, .{thread});
+            }, Thread.work, .{thread});
         }
 
         return self;
     }
     pub fn deinit(self: *Self) !void {
         // Join all threads
-        for (0..self.thread_count.value.load(.acquire)) |i| {
-            const thread = self.getThread(@intCast(i));
-            thread.getInternal().join();
-        }
+        const n = self.thread_count.load(.acquire);
+        for (0..n) |i| self.getThread(@intCast(i)).should_exit.store(true, .release); // Signal exit
+        for (0..n) |i| self.getThread(@intCast(i)).wake(); // Wake any sleeping threads
+        for (0..n) |i| self.getThread(@intCast(i)).getInternal().join(); // Join threads
 
         // Release the virtual region
         try VPA.releaseVirtualRegion(@ptrCast(self), Self.sizeOf(&self.config));
@@ -217,7 +226,7 @@ pub const ThreadPool = struct {
     /// Submits a slice of jobs to the thread pool.
     /// Thread-affinity is not accounted for in the pool, use thread-local queues for that.
     fn submit(self: *Self, jobs: []Job) !void {
-        if (self.thread_count.value.load(.monotonic)) |thread_count| {
+        if (self.thread_count.load(.monotonic)) |thread_count| {
             for (0..thread_count) |i| {
                 const thread = self.getThread(@intCast(i));
                 thread.getQueue().enqueue(jobs);
@@ -227,12 +236,15 @@ pub const ThreadPool = struct {
 };
 
 test "ThreadPool init" {
+    std.debug.print("Testing ThreadPool initialization...\n", .{});
     const pool = try ThreadPool.init(.{
         .max_thread_count = 8,
         .stack_size = std.mem.alignForward(usize, 1024 * 16, std.heap.pageSize()), // 16 KiB aligned to page size
         .main_queue_capacity = 1024,
         .worker_queue_capacity = 128,
+        .worker_saturation_threshold = 64,
     }, 4);
+    std.debug.print("ThreadPool initialized with {d} threads\n", .{pool.thread_count.load(.acquire)});
     defer pool.deinit() catch
         std.debug.panic("Failed to deinitialize ThreadPool\n", .{});
 }

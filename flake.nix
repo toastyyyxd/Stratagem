@@ -2,7 +2,7 @@
   description = "Zig project flake";
 
   inputs = {
-    zig2nix.url = "github:toastyyyxd/zig2nix";
+    zig2nix.url = "github:cloudef/zig2nix";
     
     zls-overlay.url = "github:zigtools/zls";
   };
@@ -10,7 +10,7 @@
   outputs = { zig2nix, zls-overlay, ... }: let
     flake-utils = zig2nix.inputs.flake-utils;
   in (flake-utils.lib.eachDefaultSystem (system: let
-      env = zig2nix.outputs.zig-env.${system} { zig = zig2nix.outputs.packages.${system}.zig-master; };
+      env = zig2nix.outputs.zig-env.${system} { zig = zig2nix.outputs.packages.${system}.zig-latest; };
       zls = zls-overlay.packages.x86_64-linux.zls;
     in with builtins; with env.pkgs.lib; rec {
       packages.foreign = env.package { # Clean binaries for shipping outside nix

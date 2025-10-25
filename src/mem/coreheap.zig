@@ -2,7 +2,6 @@ const std = @import("std");
 const allocator = @import("./allocator.zig");
 const OptionalU32 = @import("./unmanaged_optional.zig").OptionalU32;
 const Optional = @import("./unmanaged_optional.zig").Optional;
-const xev = @import("../main.zig").xev;
 const loop = @import("../scheduling.zig").get_loop();
 const thread_pool = @import("../scheduling.zig").get_thread_pool();
 

@@ -67,20 +67,6 @@ pub fn RingBuffer(comptime T: type) type {
             }
             return Self.initAtPtr(buffer.ptr, capacity);
         }
-        pub fn init(al: std.mem.Allocator, capacity: u32) !*Self {
-            const size = Self.sizeOf(capacity);
-            // For simplicity in tests, just use regular allocation
-            // In production, you might want to use aligned allocation for performance
-            const buf = try al.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(alignOf()), size);
-            const self_ptr = try Self.initInSlice(buf, capacity);
-            return self_ptr;
-        }
-        /// Only use `.deinit()` if the ring buffer was initialized with `.init()`
-        pub fn deinit(self: *Self, al: std.mem.Allocator) void {
-            const size = sizeOf(self.capacity);
-            const buf = @as([*]u8, @ptrCast(self))[0..size];
-            al.free(buf);
-        }
 
         /// Returns the number of items currently in the ring buffer, not guaranteed to be accurate in a multi-threaded context.
         pub fn estimate_count(self: *Self) u64 {
@@ -116,7 +102,7 @@ pub fn RingBuffer(comptime T: type) type {
                 }
 
                 new_claimed = current_claimed + count;
-                const result = self.producer_claimed.value.cmpxchgStrong(current_claimed, new_claimed, .monotonic, .monotonic);
+                const result = self.producer_claimed.value.cmpxchgWeak(current_claimed, new_claimed, .monotonic, .monotonic);
                 if (result == null) break; // Claimed the space, exit the loop.
 
                 // Exponential backoff
@@ -184,7 +170,7 @@ pub fn RingBuffer(comptime T: type) type {
                 }
 
                 new_claimed = current_claimed + available_count;
-                const result = self.producer_claimed.value.cmpxchgStrong(current_claimed, new_claimed, .monotonic, .monotonic);
+                const result = self.producer_claimed.value.cmpxchgWeak(current_claimed, new_claimed, .monotonic, .monotonic);
                 if (result == null) break; // Claimed the space, exit the loop.
 
                 // Exponential backoff
@@ -246,7 +232,7 @@ pub fn RingBuffer(comptime T: type) type {
                 }
 
                 new_claimed = current_claimed + count;
-                const result = self.consumer_claimed.value.cmpxchgStrong(current_claimed, new_claimed, .monotonic, .monotonic);
+                const result = self.consumer_claimed.value.cmpxchgWeak(current_claimed, new_claimed, .monotonic, .monotonic);
                 if (result == null) break; // Claimed the items, exit the loop.
 
                 // Exponential backoff
@@ -300,7 +286,8 @@ pub fn RingBuffer(comptime T: type) type {
                 const current_producer_published = self.producer_published.value.load(.acquire);
 
                 if (current_claimed > current_producer_published) {
-                    return 0; // Buffer is empty
+                    std.atomic.spinLoopHint();
+                    continue;
                 }
 
                 const available_items = current_producer_published - current_claimed;
@@ -311,7 +298,7 @@ pub fn RingBuffer(comptime T: type) type {
                 available_count = @min(requested_count, available_items);
 
                 new_claimed = current_claimed + available_count;
-                const result = self.consumer_claimed.value.cmpxchgStrong(current_claimed, new_claimed, .monotonic, .monotonic);
+                const result = self.consumer_claimed.value.cmpxchgWeak(current_claimed, new_claimed, .monotonic, .monotonic);
                 if (result == null) break; // Claimed items, exit loop
 
                 // Exponential backoff on contention
@@ -384,7 +371,7 @@ pub fn RingBuffer(comptime T: type) type {
                 }
 
                 new_claimed = self_claimed + src_len;
-                const result = self.producer_claimed.value.cmpxchgStrong(self_claimed, new_claimed, .monotonic, .monotonic);
+                const result = self.producer_claimed.value.cmpxchgWeak(self_claimed, new_claimed, .monotonic, .monotonic);
                 if (result == null) break; // Claimed the space, exit the loop.
 
                 // Exponential backoff

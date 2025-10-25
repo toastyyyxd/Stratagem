@@ -22,10 +22,6 @@ pub fn build(b: *std.Build) void {
     const options_module = options.createModule();
     exe.root_module.addImport("build_options", options_module);
 
-    // libxev dependency
-    const xev = b.dependency("libxev", .{ .target = target, .optimize = optimize });
-    exe.root_module.addImport("xev", xev.module("xev"));
-
     // Raylib dependency
     const raylib_dep = b.dependency("raylib_zig", .{
         .target = target,

@@ -24,6 +24,12 @@
     // original project's identity. Thus it is recommended to leave the comment
     // on the following line intact, so that it shows up in code reviews that
     // modify the field.
+    .dependencies = .{
+        .raylib_zig = .{
+            .url = "git+https://github.com/toastyyyxd/raylib-zig.git#163b1ef2e993fe7cc7c76bb3213d98612f4b7676",
+            .hash = "raylib_zig-5.6.0-dev-KE8REGNJBQDSjjyCmf4ATVQtk_OaBpY0B7kBxwSOPEGZ",
+        },
+    },
     .fingerprint = 0xe35e00df11111111, // Changing this has security and trust implications.
 
     // Tracks the earliest Zig version that the package considers to be a
@@ -35,16 +41,6 @@
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
-    .dependencies = .{
-        .raylib_zig = .{
-            .url = "git+https://github.com/toastyyyxd/raylib-zig#4874aa2598ad1d8e2be1d2996c280eae2aa9fb1d",
-            .hash = "raylib_zig-5.6.0-dev-KE8REMAuBQDd7FzorNpfNeB8ptFE1dM_d9jdo69NFFQR",
-        },
-        .libxev = .{
-            .url = "git+https://github.com/mitchellh/libxev#9f785d202ddccf7a625e799250579253977978b6",
-            .hash = "libxev-0.0.0-86vtcx8dEwDfl6p4tGVxCygft8oOsggfba9JO-k28J2x",
-        },
-    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

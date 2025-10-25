@@ -34,9 +34,13 @@ test "ringbuffer mpmc perf stress test" {
     const num_consumers = 4;
     const test_duration_ms = 1000;
 
+    // Allocate memory for ring buffer
+    const size = RB.sizeOf(capacity);
+    const buffer = try std.testing.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(RB)), size);
+    defer std.testing.allocator.free(buffer);
+
     // Initialize ring buffer
-    const ring_buffer = try RB.init(std.testing.allocator, capacity);
-    defer ring_buffer.deinit(std.testing.allocator);
+    const ring_buffer = try RB.initInSlice(buffer, capacity);
 
     // Performance and integrity tracking
     var total_produced: std.atomic.Value(u64) align(std.atomic.cache_line) = std.atomic.Value(u64).init(0);
@@ -233,12 +237,16 @@ test "ringbuffer import functionality" {
     const RB = RingBuffer(TestItem);
     const capacity = 16;
 
-    // Create source and destination ring buffers
-    const src_buffer = try RB.init(std.testing.allocator, capacity);
-    defer src_buffer.deinit(std.testing.allocator);
+    // Allocate memory for ring buffers
+    const size = RB.sizeOf(capacity);
+    const buffer1 = try std.testing.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(RB)), size);
+    defer std.testing.allocator.free(buffer1);
+    const buffer2 = try std.testing.allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(RB)), size);
+    defer std.testing.allocator.free(buffer2);
 
-    const dst_buffer = try RB.init(std.testing.allocator, capacity);
-    defer dst_buffer.deinit(std.testing.allocator);
+    // Create source and destination ring buffers
+    const src_buffer = try RB.initInSlice(buffer1, capacity);
+    const dst_buffer = try RB.initInSlice(buffer2, capacity);
 
     // Fill source buffer with test data
     var test_data = [_]u32{ 1, 2, 3, 4, 5, 6, 7, 8 };
