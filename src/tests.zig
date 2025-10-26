@@ -3,12 +3,6 @@ const build_options = @import("build_options");
 
 // Tests are in tests/ directory, this file is used to import them all.
 
-test {
-    if (build_options.test_logs) {
-        std.testing.log_level = .debug;
-    }
-}
-
 comptime {
     _ = @import("tests/ring_buffer.zig");
     _ = @import("orca/thread_pool.zig");

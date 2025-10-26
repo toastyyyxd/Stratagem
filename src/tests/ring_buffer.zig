@@ -5,6 +5,8 @@ const pinCurrentThreadToCore = @import("../orca/pin_thread.zig").pinCurrentThrea
 const builtin = @import("builtin");
 
 test "ringbuffer build and init" {
+    std.debug.print("Testing ringbuffer build and init...\n", .{});
+
     const T = RingBuffer(u32);
     const capacity = 8;
     const size = T.sizeOf(capacity);
@@ -19,9 +21,13 @@ test "ringbuffer build and init" {
     try std.testing.expect(ring_buffer.producer_published.value.load(.monotonic) == 0);
     try std.testing.expect(ring_buffer.consumer_claimed.value.load(.monotonic) == 0);
     try std.testing.expect(ring_buffer.consumer_published.value.load(.monotonic) == 0);
+
+    std.debug.print("Done!\n", .{});
 }
 
 test "ringbuffer mpmc perf stress test" {
+    std.debug.print("Testing ringbuffer perf..\n", .{});
+
     const TestItem = struct {
         producer_id: u32,
         sequence: u32,
@@ -32,7 +38,7 @@ test "ringbuffer mpmc perf stress test" {
     const capacity = 256; // Good balance between memory usage and contention reduction
     const num_producers = 4; // Producers are much faster than consumers due to the integrity check
     const num_consumers = 4;
-    const test_duration_ms = 1000;
+    const test_duration_ms = 5000;
 
     // Allocate memory for ring buffer
     const size = RB.sizeOf(capacity);
@@ -211,17 +217,17 @@ test "ringbuffer mpmc perf stress test" {
     const ops_per_second = (final_produced + final_consumed) * 1000 / test_duration_ms;
 
     // Print performance results
-    std.log.info("MPMC Performance Stress Test Results:\n", .{});
-    std.log.info("- Test duration: {} ms\n", .{test_duration_ms});
-    std.log.info("- Producers: {}, Consumers: {}, System CPUs: {}\n", .{ num_producers, num_consumers, try std.Thread.getCpuCount() });
-    std.log.info("- Item size: {} bytes\n", .{@sizeOf(TestItem)});
-    std.log.info("- Ring buffer capacity: {}\n", .{capacity});
-    std.log.info("- Items produced: {}\n", .{final_produced});
-    std.log.info("- Items consumed: {}\n", .{final_consumed});
-    std.log.info("- Total operations: {}\n", .{final_produced + final_consumed});
-    std.log.info("- Operations/second: {}\n", .{ops_per_second});
-    std.log.info("- Messages/second: {}\n", .{@divFloor(ops_per_second, 2)});
-    std.log.info("- Integrity errors: {}\n", .{final_errors});
+    std.debug.print("MPMC RingBuffer perf:\n", .{});
+    std.debug.print("- Test duration: {} ms\n", .{test_duration_ms});
+    std.debug.print("- Producers: {}, Consumers: {}, System CPUs: {}\n", .{ num_producers, num_consumers, try std.Thread.getCpuCount() });
+    std.debug.print("- Item size: {} bytes\n", .{@sizeOf(TestItem)});
+    std.debug.print("- Ring buffer capacity: {}\n", .{capacity});
+    std.debug.print("- Items produced: {}\n", .{final_produced});
+    std.debug.print("- Items consumed: {}\n", .{final_consumed});
+    std.debug.print("- Total operations: {}\n", .{final_produced + final_consumed});
+    std.debug.print("- Operations/second: {}\n", .{ops_per_second});
+    std.debug.print("- Messages/second: {}\n", .{@divFloor(ops_per_second, 2)});
+    std.debug.print("- Integrity errors: {}\n", .{final_errors});
 
     // Basic integrity checks
     try std.testing.expect(final_errors == 0); // No integrity violations
@@ -229,10 +235,12 @@ test "ringbuffer mpmc perf stress test" {
     try std.testing.expect(final_consumed > 0); // Consumers did work
     //try std.testing.expect(ops_per_second > if (builtin.mode == .Debug) 200_000_000 else 500_000_000); // Minimum performance threshold
 
-    std.log.info("Performance test completed successfully!\n", .{});
+    std.debug.print("Done!\n", .{});
 }
 
 test "ringbuffer import functionality" {
+    std.debug.print("Testing ringbuffer import functionality...\n", .{});
+
     const TestItem = u32;
     const RB = RingBuffer(TestItem);
     const capacity = 16;
@@ -272,4 +280,6 @@ test "ringbuffer import functionality" {
 
     // This should fail due to insufficient space
     try std.testing.expect(!dst_buffer.import(src_buffer));
+
+    std.debug.print("Done!\n", .{});
 }

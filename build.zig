@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     const is_dev = optimize != .ReleaseSafe and optimize != .ReleaseFast;
     options.addOption(bool, "is_dev", is_dev);
-    options.addOption(bool, "test_logs", b.option(bool, "testLogs", "enable logging in tests") orelse false);
     const options_module = options.createModule();
     exe.root_module.addImport("build_options", options_module);
 

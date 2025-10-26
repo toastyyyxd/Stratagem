@@ -236,7 +236,7 @@ pub const ThreadPool = struct {
 };
 
 test "ThreadPool init" {
-    std.debug.print("Testing ThreadPool initialization...\n", .{});
+    std.debug.print("Testing ThreadPool initialization and deinit...\n", .{});
     const pool = try ThreadPool.init(.{
         .max_thread_count = 8,
         .stack_size = std.mem.alignForward(usize, 1024 * 16, std.heap.pageSize()), // 16 KiB aligned to page size
@@ -245,6 +245,8 @@ test "ThreadPool init" {
         .worker_saturation_threshold = 64,
     }, 4);
     std.debug.print("ThreadPool initialized with {d} threads\n", .{pool.thread_count.load(.acquire)});
-    defer pool.deinit() catch
+    pool.deinit() catch
         std.debug.panic("Failed to deinitialize ThreadPool\n", .{});
+    std.debug.print("ThreadPool deinitialized successfully\n", .{});
+    std.debug.print("Done!\n", .{});
 }
