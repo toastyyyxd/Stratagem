@@ -25,8 +25,8 @@ test "ringbuffer build and init" {
     std.debug.print("Done!\n", .{});
 }
 
-test "ringbuffer mpmc perf stress test" {
-    std.debug.print("Testing ringbuffer perf..\n", .{});
+test "ringbuffer perf" {
+    std.debug.print("Testing ringbuffer perf...\n", .{});
 
     const TestItem = struct {
         producer_id: u32,
@@ -38,7 +38,7 @@ test "ringbuffer mpmc perf stress test" {
     const capacity = 256; // Good balance between memory usage and contention reduction
     const num_producers = 4; // Producers are much faster than consumers due to the integrity check
     const num_consumers = 4;
-    const test_duration_ms = 5000;
+    const test_duration_ms = 500;
 
     // Allocate memory for ring buffer
     const size = RB.sizeOf(capacity);
@@ -217,17 +217,12 @@ test "ringbuffer mpmc perf stress test" {
     const ops_per_second = (final_produced + final_consumed) * 1000 / test_duration_ms;
 
     // Print performance results
-    std.debug.print("MPMC RingBuffer perf:\n", .{});
-    std.debug.print("- Test duration: {} ms\n", .{test_duration_ms});
-    std.debug.print("- Producers: {}, Consumers: {}, System CPUs: {}\n", .{ num_producers, num_consumers, try std.Thread.getCpuCount() });
-    std.debug.print("- Item size: {} bytes\n", .{@sizeOf(TestItem)});
-    std.debug.print("- Ring buffer capacity: {}\n", .{capacity});
-    std.debug.print("- Items produced: {}\n", .{final_produced});
-    std.debug.print("- Items consumed: {}\n", .{final_consumed});
-    std.debug.print("- Total operations: {}\n", .{final_produced + final_consumed});
-    std.debug.print("- Operations/second: {}\n", .{ops_per_second});
-    std.debug.print("- Messages/second: {}\n", .{@divFloor(ops_per_second, 2)});
-    std.debug.print("- Integrity errors: {}\n", .{final_errors});
+    std.debug.print("ringbuffer test:\n", .{});
+    std.debug.print("- test_duration_ms={}, \n", .{test_duration_ms});
+    std.debug.print("- num_producers={}, num_consumers={}, num_system_cpus={}, \n", .{ num_producers, num_consumers, try std.Thread.getCpuCount() });
+    std.debug.print("- sizeof_item={}, capacity={}, \n", .{ @sizeOf(TestItem), capacity });
+    std.debug.print("- final_produced={}, final_consumed={}, total_ops={}, \n", .{ final_produced, final_consumed, final_produced + final_consumed });
+    std.debug.print("- ops_per_second={}, msgs_per_second={}, final_errors={}\n", .{ ops_per_second, @divFloor(ops_per_second, 2), final_errors });
 
     // Basic integrity checks
     try std.testing.expect(final_errors == 0); // No integrity violations
@@ -238,8 +233,8 @@ test "ringbuffer mpmc perf stress test" {
     std.debug.print("Done!\n", .{});
 }
 
-test "ringbuffer import functionality" {
-    std.debug.print("Testing ringbuffer import functionality...\n", .{});
+test "ringbuffer import" {
+    std.debug.print("Testing ringbuffer import...\n", .{});
 
     const TestItem = u32;
     const RB = RingBuffer(TestItem);

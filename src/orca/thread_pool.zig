@@ -7,39 +7,41 @@ const Queue = RingBuffer(Job);
 
 /// A unit of work that can be submitted to the thread pool.
 /// Also functions as a VTable for any other FSM.
-const Job = struct {
+pub const Job = struct {
     /// The context to be passed to the tick function.
     /// Usually a pointer to the FSM that this job acts as a VTable for.
     ctx: *anyopaque,
     /// The function to be called when the job is ready to be processed.
     /// Usually a method of the FSM in .ctx.
     tick: *fn (*anyopaque, *Thread) void,
-    /// The intensity of the job, used for job distribution.
+    /// The load of the job, used for job distribution.
     /// Takes priority over the ring buffer capacity.
-    intensity: u8,
+    load: u8,
 };
 
-const Config = struct {
+pub const Config = struct {
     max_thread_count: u16,
     stack_size: usize,
-    main_queue_capacity: u32,
-    worker_queue_capacity: u32,
-    worker_saturation_threshold: u32,
+    worker_queue_capacity: u64,
+    worker_load_threshold: u64,
+    avg_load_threshold: u64,
 };
 
-const Thread = struct {
+pub const Thread = struct {
+    const ThreadError = error{ThreadAsleep};
+
     const Self = @This();
 
     const Active = enum(u8) {
         /// Thread is either waking up, actively processing jobs and has space in queue, or spinning for jobs.
         Running,
         /// Thread is either setting up to wait for the futex, or already waiting.
-        Idle,
+        Asleep,
     };
     active: std.atomic.Value(Active) align(std.atomic.cache_line),
     should_exit: std.atomic.Value(bool) align(std.atomic.cache_line),
     idle_futex_word: std.atomic.Value(u32) align(std.atomic.cache_line),
-    saturation: u32 align(std.atomic.cache_line),
+    load: std.atomic.Value(u64) align(std.atomic.cache_line),
 
     parent: *ThreadPool,
 
@@ -66,43 +68,83 @@ const Thread = struct {
         return @ptrFromInt(@intFromPtr(self) + offsetQueue());
     }
 
-    pub fn work(self: *Self) void {
+    pub fn work(self: *Self) !void {
         self.active.store(.Running, .release);
         var jobs: [16]Job = undefined;
+        var stolen: [12]Job = undefined;
         var wait_count: u32 = 0;
+        var iterations: u64 = 0; // used for probe rotation
         while (self.should_exit.load(.acquire) == false) {
+            iterations +|= 1;
             const len = self.getQueue().pop_some(&jobs);
             if (len > 0) {
+                var load_reduced: u64 = 0;
                 for (jobs[0..len]) |job| {
                     job.tick(job.ctx, self);
                     wait_count = 0;
-                    self.saturation -|= job.intensity; // Can avoid atomics since it is only accessed by this thread and in one cache line.
+                    load_reduced += @as(u64, job.load);
                 }
-            } else {
-                if (wait_count < 64) {
-                    std.atomic.spinLoopHint();
-                } else if (wait_count < 256) {
-                    std.Thread.yield() catch std.debug.print("Thread failed to yield!\n", .{});
-                } else {
-                    self.active.store(.Idle, .release);
-                    if (self.should_exit.load(.acquire)) break; // Check exit condition again before sleeping
-                    // Publish "waiting" and consume any pending signal in one op.
-                    const prev =
-                        self.idle_futex_word.swap(0, .acq_rel);
-                    if (prev == 0) {
-                        // handle spurious wakeups
-                        while (self.idle_futex_word.load(.acquire) == 0) {
-                            std.Thread.Futex.wait(&self.idle_futex_word, 0);
-                        }
-                    }
-                    wait_count = 0;
-                    self.active.store(.Running, .release);
+                _ = self.load.fetchSub(load_reduced, .acq_rel);
+                if (self.load.load(.monotonic) >= self.parent.config.avg_load_threshold) {
+                    self.parent.ensureThreads(self.parent.thread_count.load(.acquire));
                 }
-                wait_count +|= 1;
+                continue;
             }
-            @atomicStore(u32, &self.saturation, self.saturation, .release); // Publish saturation
+
+            const pool = self.parent;
+            const n = pool.thread_count.load(.acquire);
+            if (n > 1) {
+                const probe_budget: u16 = n / 2;
+                var probed: u16 = 0;
+
+                var idx: u16 = @intCast((@intFromPtr(self) + @as(usize, @truncate(iterations)) >> 6) % @as(usize, n));
+
+                var stole_any = false;
+                while (probed < probe_budget) : (probed += 1) {
+                    idx = (idx + 1) % n;
+                    const victim = pool.getThread(idx);
+                    if (victim == self) continue;
+
+                    const victim_load: u64 = victim.load.load(.acquire);
+                    const victim_used_capacity: u64 = victim.getQueue().estimate_count();
+                    if (victim_load < pool.config.worker_load_threshold / 2) continue;
+                    if (victim_used_capacity < pool.config.worker_queue_capacity / 2) continue;
+
+                    var stolen_load: u64 = 0;
+                    const stolen_len = victim.getQueue().pop_some(&stolen);
+                    if (stolen_len == 0) continue;
+                    for (stolen[0..stolen_len]) |job| stolen_load += @as(u64, job.load);
+                    _ = self.load.fetchAdd(stolen_load, .acq_rel);
+                    _ = victim.load.fetchSub(stolen_load, .acq_rel);
+                    for (stolen[0..stolen_len]) |job| {
+                        job.tick(job.ctx, self);
+                    }
+                    _ = self.load.fetchSub(stolen_load, .acq_rel);
+                    stole_any = true;
+                    break;
+                }
+                if (stole_any) continue;
+            }
+
+            if (wait_count < 64) {
+                wait_count +|= 1;
+                std.atomic.spinLoopHint();
+            } else if (wait_count < 256) {
+                wait_count +|= 1;
+                std.Thread.yield() catch {};
+            } else {
+                self.active.store(.Asleep, .release);
+                if (self.should_exit.load(.acquire)) break; // Check exit condition again before sleeping
+                // Publish "waiting" and consume any pending signal in one op.
+                const prev = self.idle_futex_word.swap(0, .acq_rel);
+                if (prev == 0) // handle spurious wakeups
+                    while (self.idle_futex_word.load(.acquire) == 0)
+                        std.Thread.Futex.wait(&self.idle_futex_word, 0);
+                if (self.should_exit.load(.acquire)) break;
+                wait_count = 0;
+                self.active.store(.Running, .release);
+            }
         }
-        std.debug.print("Thread exiting.\n", .{});
     }
 
     pub fn wake(self: *Self) void {
@@ -110,15 +152,24 @@ const Thread = struct {
         std.Thread.Futex.wake(&self.idle_futex_word, 1);
     }
 
-    /// Enqueue jobs locally, or round-robin to other threads.
-    fn enqueue(self: *Self, jobs: []Job, local: bool) void {
-        const job_count = jobs.len;
-        if (local) {
-            const local_count = self.getQueue().push_some(jobs);
-            if (local_count > job_count) return; // All jobs were enqueued locally
-        }
-        const thread_count = @as(u64, @intCast(self.parent.thread_count.load(.acquire)));
-        if (jobs.len >= thread_count) {}
+    /// Submit jobs to this thread while in the same thread.
+    ///
+    /// All jobs in the slice must have the same `load` value.
+    /// Supplying inconsistent `load` values results in undefined behavior, as this function assumes uniformity.
+    fn submit_local(self: *Self, jobs: []Job) u64 {
+        const enqueued = self.getQueue().push_some(jobs);
+        _ = self.load.fetchAdd(enqueued * @as(u64, @intCast(jobs[0].load)), .monotonic);
+        return enqueued;
+    }
+
+    /// Submit jobs to this thread from another thread.
+    ///
+    /// All jobs in the slice must have the same `load` value.
+    /// Supplying inconsistent `load` values results in undefined behavior, as this function assumes uniformity.
+    fn submit_remote(self: *Self, jobs: []Job) u64 {
+        const enqueued = self.getQueue().push_some(jobs);
+        _ = self.load.fetchAdd(enqueued * @as(u64, @intCast(jobs[0].load)), .acq_rel);
+        return enqueued;
     }
 };
 
@@ -179,6 +230,7 @@ pub const ThreadPool = struct {
     }
 
     pub fn init(config: Config, init_thread_count: u16) !*Self {
+        std.debug.assert(config.max_thread_count <= 64); // arbitrary limit to avoid allocations
         std.debug.assert(config.stack_size % std.heap.pageSize() == 0); // ensure stack size is a multiple of page size
         std.debug.assert(init_thread_count <= config.max_thread_count); // ensure we do not exceed max thread count
 
@@ -192,23 +244,7 @@ pub const ThreadPool = struct {
         self.getFba().* = InplaceBufferAllocator.init(@ptrFromInt(@intFromPtr(self) + offsetStackRegion(&config)), config.stack_size * init_thread_count);
         self.getFbaInterface().* = self.getFba().threadSafeAllocator();
 
-        // Initialize Threads, init queue first, then spawn
-        for (0..init_thread_count) |i| {
-            const thread = self.getThread(@intCast(i));
-            const queue = thread.getQueue();
-            _ = try Queue.initAtPtr(@ptrCast(queue), config.worker_queue_capacity);
-            thread.parent = self;
-            thread.should_exit = .init(false);
-            thread.idle_futex_word = .init(1);
-            thread.active = .init(.Idle);
-            thread.saturation = 0;
-            // Spawn the thread, passing the queue as an argument
-            _ = self.thread_count.fetchAdd(1, .seq_cst);
-            thread.getInternal().* = try std.Thread.spawn(.{
-                .allocator = self.getFbaInterface().*,
-                .stack_size = config.stack_size,
-            }, Thread.work, .{thread});
-        }
+        self.ensureThreads(init_thread_count);
 
         return self;
     }
@@ -223,30 +259,141 @@ pub const ThreadPool = struct {
         try VPA.releaseVirtualRegion(@ptrCast(self), Self.sizeOf(&self.config));
     }
 
-    /// Submits a slice of jobs to the thread pool.
-    /// Thread-affinity is not accounted for in the pool, use thread-local queues for that.
-    fn submit(self: *Self, jobs: []Job) !void {
-        if (self.thread_count.load(.monotonic)) |thread_count| {
-            for (0..thread_count) |i| {
-                const thread = self.getThread(@intCast(i));
-                thread.getQueue().enqueue(jobs);
+    pub fn getRunningCount(self: *Self) u16 {
+        var n: u16 = 0;
+        for (0..self.thread_count.load(.acquire)) |i| {
+            if (self.getThread(i).active.load(.acquire) == .Running) n += 1;
+        }
+        return n;
+    }
+
+    fn initThread(self: *Self, i: u16) !void {
+        const thread = self.getThread(@intCast(i));
+        const queue = thread.getQueue();
+        _ = try Queue.initAtPtr(@ptrCast(queue), self.config.worker_queue_capacity);
+        thread.parent = self;
+        thread.should_exit = .init(false);
+        thread.idle_futex_word = .init(1);
+        thread.active = .init(.Asleep);
+        thread.load = .init(0);
+        thread.getInternal().* = try std.Thread.spawn(.{
+            .allocator = self.getFbaInterface().*,
+            .stack_size = self.config.stack_size,
+        }, Thread.work, .{thread});
+    }
+
+    /// Starts or wakes up threads if the target isn't reached.
+    /// Does nothing if target is already reached or is higher than max.
+    pub fn ensureThreads(self: *Self, target: u16) void {
+        var initialized = self.thread_count.load(.acquire);
+        const capped_target = @min(target, self.config.max_thread_count);
+
+        if (initialized < capped_target) {
+            // Need to spawn new threads
+            for (initialized..capped_target) |i| {
+                _ = self.thread_count.fetchAdd(1, .seq_cst);
+                self.initThread(@as(u16, @truncate(i))) catch {
+                    std.debug.panic("Failed to spawn new thread!", .{});
+                };
+            }
+            initialized = capped_target;
+        }
+        // Enough threads exist, maybe some are asleep
+        var running: u16 = 0;
+        var asleep_threads: [64]*Thread = undefined;
+        var asleep_count: u16 = 0;
+        for (0..initialized) |i| {
+            const t = self.getThread(@intCast(i));
+            switch (t.active.load(.acquire)) {
+                .Running => running += 1,
+                .Asleep => {
+                    asleep_threads[asleep_count] = t;
+                    asleep_count += 1;
+                },
             }
         }
+        if (running < capped_target) {
+            const need_wake = capped_target - running;
+            const to_wake = @min(need_wake, asleep_count);
+            for (0..to_wake) |i| asleep_threads[i].wake();
+        }
+    }
+
+    pub fn averageLoad(self: *Self) u64 {
+        const n = self.thread_count.load(.acquire);
+        if (n == 0) return 0;
+        var total: u64 = 0;
+        for (0..n) |i| {
+            total += self.getThread(@intCast(i)).load.load(.acquire);
+        }
+        return total / n;
+    }
+
+    /// Submits a slice of jobs for execution and returns the number of jobs successfully submitted.
+    ///
+    /// All jobs in the slice must have the same `load` value.
+    /// Supplying inconsistent `load` values results in undefined behavior, as this function assumes uniformity.
+    pub fn submit(self: *Self, jobs: []Job) u64 {
+        const thread_count: u16 = self.thread_count.load(.acquire);
+        var thread_loads: [64]u64 = [_]u64{0} ** 64; // Max 64 threads supported
+        var total_current_load: u64 = 0;
+        for (0..thread_count) |i| {
+            thread_loads[i] = self.getThread(@as(u16, @truncate(i))).load.load(.acquire);
+            total_current_load += thread_loads[i];
+        }
+
+        std.debug.assert(blk: {
+            const expected_load = jobs[0].load;
+            for (jobs) |job| {
+                if (job.load != expected_load) break :blk false;
+            }
+            break :blk true;
+        });
+
+        const per_job_load = @as(u64, jobs[0].load);
+        std.debug.assert(per_job_load > 0);
+
+        const total_incoming_load: u64 = jobs.len * per_job_load;
+        const total_summed_load: u64 = total_current_load + total_incoming_load;
+
+        var per_thread_target_load: u64 = total_summed_load / thread_count;
+        var available_threads: u64 = thread_count;
+        var threads_available = [_]u16{0} ** 64;
+        // Remove threads that already exceed or are at the target load.
+        // Actively recalculating the target load ensures threads aren't excluded based on an outdated lower target.
+        var _threads_available_count: usize = 0; // only needed during loop while available threads is being adjusted
+        for (0..thread_count) |i| {
+            const thread_load = thread_loads[i];
+            if (thread_load >= per_thread_target_load) {
+                available_threads -= 1;
+                per_thread_target_load = total_summed_load / available_threads; // adjust immediately
+            } else {
+                threads_available[_threads_available_count] = @as(u16, @truncate(i));
+                _threads_available_count += 1;
+            }
+        }
+
+        // Wake threads if load will be high
+        if (per_thread_target_load >= self.config.avg_load_threshold) {
+            self.ensureThreads(@as(u16, @truncate(total_summed_load / (self.config.avg_load_threshold / 10 * 7))));
+        }
+
+        per_thread_target_load = total_summed_load / available_threads;
+        var load_remainder: u64 = total_summed_load % available_threads;
+        var jobs_submitted: u64 = 0;
+        for (0..available_threads) |i| {
+            const thread_i = threads_available[i];
+            const thread = self.getThread(@intCast(thread_i));
+            const thread_load = thread_loads[thread_i];
+            const load_diff: u64 = per_thread_target_load - thread_load;
+            const jobs_diff: u64 = (load_diff + load_remainder) / per_job_load;
+            load_remainder = (load_diff + load_remainder) % per_job_load;
+            const jobs_to_submit = @min(jobs_diff, jobs.len - jobs_submitted);
+            if (jobs_to_submit == 0) continue; // Or break if you know no more jobs can be submitted
+            jobs_submitted += thread.submit_remote(jobs[jobs_submitted .. jobs_submitted + jobs_to_submit]);
+            if (jobs_submitted == jobs.len) break; // All jobs have been submitted
+            std.debug.assert(jobs_submitted <= jobs.len);
+        }
+        return jobs_submitted;
     }
 };
-
-test "ThreadPool init" {
-    std.debug.print("Testing ThreadPool initialization and deinit...\n", .{});
-    const pool = try ThreadPool.init(.{
-        .max_thread_count = 8,
-        .stack_size = std.mem.alignForward(usize, 1024 * 16, std.heap.pageSize()), // 16 KiB aligned to page size
-        .main_queue_capacity = 1024,
-        .worker_queue_capacity = 128,
-        .worker_saturation_threshold = 64,
-    }, 4);
-    std.debug.print("ThreadPool initialized with {d} threads\n", .{pool.thread_count.load(.acquire)});
-    pool.deinit() catch
-        std.debug.panic("Failed to deinitialize ThreadPool\n", .{});
-    std.debug.print("ThreadPool deinitialized successfully\n", .{});
-    std.debug.print("Done!\n", .{});
-}

@@ -18,7 +18,7 @@ const PaddedAtomicU64 = struct {
 pub fn RingBuffer(comptime T: type) type {
     return struct {
         const Self = @This();
-        capacity: u32,
+        capacity: u64,
         producer_claimed: PaddedAtomicU64 align(std.atomic.cache_line),
         producer_published: PaddedAtomicU64 align(std.atomic.cache_line),
         consumer_claimed: PaddedAtomicU64 align(std.atomic.cache_line),
@@ -33,14 +33,14 @@ pub fn RingBuffer(comptime T: type) type {
         pub inline fn entries(self: *Self) [*]T {
             return @ptrFromInt(@intFromPtr(self) + Self.offsetEntries());
         }
-        pub fn sizeOf(capacity: u32) usize {
+        pub fn sizeOf(capacity: u64) usize {
             return @sizeOf(Self) + @sizeOf(T) * capacity;
         }
         pub inline fn alignOf() usize {
             return comptime @max(@alignOf(Self), @alignOf(T));
         }
 
-        pub fn initAtPtr(ptr: [*]u8, capacity: u32) !*Self {
+        pub fn initAtPtr(ptr: [*]u8, capacity: u64) !*Self {
             if (capacity == 0 or capacity & (capacity - 1) != 0) {
                 return error.InvalidCapacity; // Must be non-zero and a power of two
             }
@@ -55,7 +55,7 @@ pub fn RingBuffer(comptime T: type) type {
             };
             return self;
         }
-        pub fn initInSlice(buffer: []u8, capacity: u32) !*Self {
+        pub fn initInSlice(buffer: []u8, capacity: u64) !*Self {
             if (capacity == 0 or capacity & (capacity - 1) != 0) {
                 return error.InvalidCapacity; // Must be non-zero and a power of two
             }
@@ -83,7 +83,7 @@ pub fn RingBuffer(comptime T: type) type {
             var new_claimed: u64 = undefined;
             var backoff: u32 = INITIAL_BACKOFF; // Initial backoff value, can be adjusted for performance tuning.
 
-            const capacity = @as(u64, @intCast(self.capacity));
+            const capacity = self.capacity;
 
             // Phase 1: Claim space
             while (true) {
@@ -148,7 +148,7 @@ pub fn RingBuffer(comptime T: type) type {
             var available_count: u64 = undefined;
             var backoff: u32 = INITIAL_BACKOFF; // Initial backoff value, can be adjusted for performance tuning.
 
-            const capacity = @as(u64, @intCast(self.capacity));
+            const capacity = self.capacity;
 
             // Phase 1: Claim space
             while (true) {
@@ -243,7 +243,7 @@ pub fn RingBuffer(comptime T: type) type {
             }
 
             // Phase 2: Read data from claimed space
-            const capacity = @as(u64, @intCast(self.capacity));
+            const capacity = self.capacity;
             const start_idx = current_claimed & (capacity - 1);
             const end_idx = start_idx + count;
 
@@ -309,7 +309,7 @@ pub fn RingBuffer(comptime T: type) type {
             }
 
             // Phase 2: Read data from claimed space
-            const capacity = @as(u64, @intCast(self.capacity));
+            const capacity = self.capacity;
             const start_idx = current_claimed & (capacity - 1);
             const end_idx = start_idx + available_count;
 
@@ -351,7 +351,7 @@ pub fn RingBuffer(comptime T: type) type {
             var new_claimed: u64 = undefined;
             var backoff: u32 = INITIAL_BACKOFF;
 
-            const self_capacity = @as(u64, @intCast(self.capacity));
+            const self_capacity = self.capacity;
             const src_capacity = @as(u64, @intCast(src.capacity));
 
             // Phase 1: Claim space for import
