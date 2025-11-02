@@ -8,9 +8,15 @@ test "threadpool init" {
     const pool = try ThreadPool.init(.{
         .max_thread_count = 8,
         .stack_size = std.mem.alignForward(usize, 1024 * 32, std.heap.pageSize()), // 32 KiB aligned to page size
-        .worker_queue_capacity = 256,
-        .worker_load_threshold = 256,
-        .avg_load_threshold = 192,
+        .queue_capacity = 256,
+        .scale_up_load_threshold = 128,
+        .scale_up_queue_threshold = 128,
+        .steal_load_threshold = 96,
+        .steal_queue_threshold = 96,
+        .scale_up_extra_load = 16,
+        .stress_increment = 2,
+        .stress_decrement = 3,
+        .scale_up_stress_threshold = 16,
     }, 4);
     pool.deinit() catch
         std.debug.panic("Failed to deinitialize ThreadPool\n", .{});
@@ -28,8 +34,8 @@ test "threadpool test" {
 
     const Work = struct {
         pub fn tick(ctx: *anyopaque, _: *Thread) void {
-            for (0..128) |_| std.Thread.yield() catch {};
             const c = @as(*CounterCtx, @ptrCast(@alignCast(ctx)));
+            for (0..c.increment * 64) |_| std.Thread.yield() catch {};
             _ = c.counter.fetchAdd(c.increment, .acq_rel);
         }
     };
@@ -38,9 +44,15 @@ test "threadpool test" {
     const pool = try ThreadPool.init(.{
         .max_thread_count = 8,
         .stack_size = std.mem.alignForward(usize, 1024 * 64, std.heap.pageSize()),
-        .worker_queue_capacity = 1024,
-        .worker_load_threshold = 512,
-        .avg_load_threshold = 256,
+        .queue_capacity = 1024,
+        .scale_up_load_threshold = 784,
+        .scale_up_queue_threshold = 512,
+        .steal_load_threshold = 512,
+        .steal_queue_threshold = 384,
+        .scale_up_extra_load = 128,
+        .stress_increment = 2,
+        .stress_decrement = 3,
+        .scale_up_stress_threshold = 16,
     }, 4);
     defer pool.deinit() catch unreachable;
 

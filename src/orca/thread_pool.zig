@@ -22,14 +22,18 @@ pub const Job = struct {
 pub const Config = struct {
     max_thread_count: u16,
     stack_size: usize,
-    worker_queue_capacity: u64,
-    worker_load_threshold: u64,
-    avg_load_threshold: u64,
+    queue_capacity: u64,
+    scale_up_load_threshold: u64,
+    scale_up_queue_threshold: u64,
+    steal_load_threshold: u64,
+    steal_queue_threshold: u64,
+    scale_up_extra_load: u64,
+    stress_increment: u64,
+    stress_decrement: u64,
+    scale_up_stress_threshold: u64,
 };
 
 pub const Thread = struct {
-    const ThreadError = error{ThreadAsleep};
-
     const Self = @This();
 
     const Active = enum(u8) {
@@ -56,7 +60,7 @@ pub const Thread = struct {
         return offset;
     }
     inline fn sizeOf(config: *const Config) usize {
-        return offsetQueue() + Queue.sizeOf(config.worker_queue_capacity);
+        return offsetQueue() + Queue.sizeOf(config.queue_capacity);
     }
     inline fn alignOf() usize {
         return comptime @max(@alignOf(Self), @alignOf(std.Thread), Queue.alignOf());
@@ -74,6 +78,7 @@ pub const Thread = struct {
         var stolen: [12]Job = undefined;
         var wait_count: u32 = 0;
         var iterations: u64 = 0; // used for probe rotation
+        var stress: u64 = 0;
         while (self.should_exit.load(.acquire) == false) {
             iterations +|= 1;
             const len = self.getQueue().pop_some(&jobs);
@@ -85,9 +90,13 @@ pub const Thread = struct {
                     load_reduced += @as(u64, job.load);
                 }
                 _ = self.load.fetchSub(load_reduced, .acq_rel);
-                if (self.load.load(.monotonic) >= self.parent.config.avg_load_threshold) {
-                    self.parent.ensureThreads(self.parent.thread_count.load(.acquire));
-                }
+                if ((self.load.load(.monotonic) >= self.parent.config.scale_up_load_threshold) or
+                    (self.getQueue().estimate_count() >= self.parent.config.scale_up_queue_threshold))
+                {
+                    stress +|= self.parent.config.stress_increment;
+                    const extraThreads: u16 = if (stress > self.parent.config.scale_up_stress_threshold) 1 else 0;
+                    self.parent.ensureThreads(self.parent.thread_count.load(.acquire) + extraThreads);
+                } else stress -|= self.parent.config.stress_decrement;
                 continue;
             }
 
@@ -97,7 +106,8 @@ pub const Thread = struct {
                 const probe_budget: u16 = n / 2;
                 var probed: u16 = 0;
 
-                var idx: u16 = @intCast((@intFromPtr(self) + @as(usize, @truncate(iterations)) >> 6) % @as(usize, n));
+                // Generate self ptr + iteration hash for random-ish stealing.
+                var idx: u16 = @intCast(((@intFromPtr(self) + @as(usize, @truncate(iterations))) >> 6) % @as(usize, n));
 
                 var stole_any = false;
                 while (probed < probe_budget) : (probed += 1) {
@@ -107,8 +117,8 @@ pub const Thread = struct {
 
                     const victim_load: u64 = victim.load.load(.acquire);
                     const victim_used_capacity: u64 = victim.getQueue().estimate_count();
-                    if (victim_load < pool.config.worker_load_threshold / 2) continue;
-                    if (victim_used_capacity < pool.config.worker_queue_capacity / 2) continue;
+                    if (victim_load < pool.config.steal_load_threshold) continue;
+                    if (victim_used_capacity < pool.config.steal_queue_threshold) continue;
 
                     var stolen_load: u64 = 0;
                     const stolen_len = victim.getQueue().pop_some(&stolen);
@@ -178,6 +188,7 @@ pub const ThreadPool = struct {
 
     config: Config,
     thread_count: std.atomic.Value(u16) align(std.atomic.cache_line),
+    thread_count_claimed: std.atomic.Value(u16) align(std.atomic.cache_line),
 
     inline fn offsetBumpAllocator() usize {
         var offset: usize = @sizeOf(Self);
@@ -269,8 +280,9 @@ pub const ThreadPool = struct {
 
     fn initThread(self: *Self, i: u16) !void {
         const thread = self.getThread(@intCast(i));
+        try VPA.commitVirtualPages(@as(*u8, @ptrFromInt(@intFromPtr(self) + ThreadPool.offsetStackRegion(&self.config) + self.config.stack_size * i)), self.config.stack_size);
         const queue = thread.getQueue();
-        _ = try Queue.initAtPtr(@ptrCast(queue), self.config.worker_queue_capacity);
+        _ = try Queue.initAtPtr(@ptrCast(queue), self.config.queue_capacity);
         thread.parent = self;
         thread.should_exit = .init(false);
         thread.idle_futex_word = .init(1);
@@ -285,24 +297,36 @@ pub const ThreadPool = struct {
     /// Starts or wakes up threads if the target isn't reached.
     /// Does nothing if target is already reached or is higher than max.
     pub fn ensureThreads(self: *Self, target: u16) void {
-        var initialized = self.thread_count.load(.acquire);
         const capped_target = @min(target, self.config.max_thread_count);
+        var claimed_initialized_threads = self.thread_count_claimed.load(.acquire);
+        var published_initialized_threads = self.thread_count.load(.acquire);
 
-        if (initialized < capped_target) {
+        if (claimed_initialized_threads < capped_target) {
+            while (true) { // Claim thread counter
+                const new_initialized = self.thread_count_claimed.cmpxchgWeak(claimed_initialized_threads, capped_target, .acq_rel, .acquire);
+                if (new_initialized == null) break;
+                claimed_initialized_threads = new_initialized.?; // new start index
+            }
             // Need to spawn new threads
-            for (initialized..capped_target) |i| {
-                _ = self.thread_count.fetchAdd(1, .seq_cst);
+            for (claimed_initialized_threads..capped_target) |i| {
                 self.initThread(@as(u16, @truncate(i))) catch {
                     std.debug.panic("Failed to spawn new thread!", .{});
                 };
             }
-            initialized = capped_target;
+            claimed_initialized_threads = capped_target;
+            while (true) {
+                const new_published = self.thread_count.cmpxchgWeak(published_initialized_threads, capped_target, .acq_rel, .acquire);
+                if (new_published == null) break;
+                std.atomic.spinLoopHint(); // wait to publish in order as indexes matter
+            }
+            published_initialized_threads = capped_target;
         }
+
         // Enough threads exist, maybe some are asleep
         var running: u16 = 0;
         var asleep_threads: [64]*Thread = undefined;
         var asleep_count: u16 = 0;
-        for (0..initialized) |i| {
+        for (0..published_initialized_threads) |i| {
             const t = self.getThread(@intCast(i));
             switch (t.active.load(.acquire)) {
                 .Running => running += 1,
@@ -374,8 +398,10 @@ pub const ThreadPool = struct {
         }
 
         // Wake threads if load will be high
-        if (per_thread_target_load >= self.config.avg_load_threshold) {
-            self.ensureThreads(@as(u16, @truncate(total_summed_load / (self.config.avg_load_threshold / 10 * 7))));
+        if ((per_thread_target_load >= self.config.scale_up_load_threshold) or
+            (per_thread_target_load / per_job_load >= self.config.scale_up_queue_threshold))
+        {
+            self.ensureThreads(@as(u16, @truncate(total_summed_load / (self.config.scale_up_load_threshold + self.config.scale_up_extra_load))));
         }
 
         per_thread_target_load = total_summed_load / available_threads;

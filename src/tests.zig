@@ -6,4 +6,5 @@ const build_options = @import("build_options");
 comptime {
     _ = @import("tests/ring_buffer.zig");
     _ = @import("tests/thread_pool.zig");
+    //_ = @import("mem/coreheap.zig");
 }

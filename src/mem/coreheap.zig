@@ -1,9 +1,7 @@
 const std = @import("std");
-const allocator = @import("./allocator.zig");
+const VPA = @import("./virtual_page_allocator.zig");
 const OptionalU32 = @import("./unmanaged_optional.zig").OptionalU32;
 const Optional = @import("./unmanaged_optional.zig").Optional;
-const loop = @import("../scheduling.zig").get_loop();
-const thread_pool = @import("../scheduling.zig").get_thread_pool();
 
 pub const SlabSize = 16 * 1024; // 16kb per slab
 
@@ -242,7 +240,7 @@ pub const CoreHeap = struct {
         // Set the lengths of the free array, no need to use atomics here since this is the initialization phase
         @as(*u32, @alignCast(@ptrCast(fieldRange(self.ptr, &new_cap_state, .FreeSlabIndicesLen)))).* = safe_free_indices_end_index;
 
-        // TODO: keep going with the double buffered switch
+        // TODO: keep going with the double buffered switch (DONE)
         // ### First, we update the capacity state atomically.
         self.capacity_state.store(new_cap_state, .release);
 
