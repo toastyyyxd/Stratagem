@@ -166,7 +166,7 @@ pub const Thread = struct {
     ///
     /// All jobs in the slice must have the same `load` value.
     /// Supplying inconsistent `load` values results in undefined behavior, as this function assumes uniformity.
-    fn submit_local(self: *Self, jobs: []Job) u64 {
+    fn submitLocal(self: *Self, jobs: []Job) u64 {
         const enqueued = self.getQueue().push_some(jobs);
         _ = self.load.fetchAdd(enqueued * @as(u64, @intCast(jobs[0].load)), .monotonic);
         return enqueued;
@@ -176,7 +176,7 @@ pub const Thread = struct {
     ///
     /// All jobs in the slice must have the same `load` value.
     /// Supplying inconsistent `load` values results in undefined behavior, as this function assumes uniformity.
-    fn submit_remote(self: *Self, jobs: []Job) u64 {
+    fn submitRemote(self: *Self, jobs: []Job) u64 {
         const enqueued = self.getQueue().push_some(jobs);
         _ = self.load.fetchAdd(enqueued * @as(u64, @intCast(jobs[0].load)), .acq_rel);
         return enqueued;
@@ -416,7 +416,7 @@ pub const ThreadPool = struct {
             load_remainder = (load_diff + load_remainder) % per_job_load;
             const jobs_to_submit = @min(jobs_diff, jobs.len - jobs_submitted);
             if (jobs_to_submit == 0) continue; // Or break if you know no more jobs can be submitted
-            jobs_submitted += thread.submit_remote(jobs[jobs_submitted .. jobs_submitted + jobs_to_submit]);
+            jobs_submitted += thread.submitRemote(jobs[jobs_submitted .. jobs_submitted + jobs_to_submit]);
             if (jobs_submitted == jobs.len) break; // All jobs have been submitted
             std.debug.assert(jobs_submitted <= jobs.len);
         }

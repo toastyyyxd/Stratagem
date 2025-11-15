@@ -64,7 +64,7 @@ test "threadpool test" {
     };
 
     const configs = [_]LoadConfig{
-        .{ .increment = 1, .load = 1, .count = 40000 },
+        .{ .increment = 1, .load = 1, .count = 600000 },
         .{ .increment = 2, .load = 2, .count = 30000 },
         .{ .increment = 5, .load = 5, .count = 30000 },
         .{ .increment = 64, .load = 64, .count = 5000 },
