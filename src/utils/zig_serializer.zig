@@ -372,14 +372,14 @@ pub fn writeValue(writer: *Writer, comptime T: type, comptime val: T, comptime l
         .pointer => |p| {
             if (p.size == .slice and p.child == u8) {
                 try writer.print("\"{s}\"", .{val});
-                return;
-            }
-            if (p.size == .one) {
+            } else if (p.size == .one) {
                 try writer.writeAll("&");
                 try writeValue(writer, p.child, val.*, level + 1);
             } else {
                 // Handle slices, many, c pointers differently
-                try writer.print("<pointer to {s}>", .{writeType(writer, p.child, level + 1)});
+                try writer.writeAll("<pointer to ");
+                try writeType(writer, p.child, level + 1);
+                try writer.writeAll(">");
             }
         },
         .@"fn" => |f| {
