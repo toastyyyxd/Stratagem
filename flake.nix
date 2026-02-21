@@ -10,7 +10,7 @@
   outputs = { zig2nix, zls-overlay, ... }: let
     flake-utils = zig2nix.inputs.flake-utils;
   in (flake-utils.lib.eachDefaultSystem (system: let
-      env = zig2nix.outputs.zig-env.${system} { zig = zig2nix.outputs.packages.${system}.zig-latest; };
+      env = zig2nix.outputs.zig-env.${system} { zig = zig2nix.outputs.packages.${system}.zig-master; };
       zls = zls-overlay.packages.x86_64-linux.zls;
     in with builtins; with env.pkgs.lib; rec {
       packages.foreign = env.package { # Clean binaries for shipping outside nix
@@ -27,6 +27,7 @@
           wayland
           libxkbcommon
           egl-wayland
+          gdb
         ]; # Packages for compiling
         buildInputs = with env.pkgs; []; # Packages for linking
         zigPreferMusl = true; # Smaller binaries, avoids shipping glibc
@@ -50,7 +51,7 @@
       apps.zig2nix = env.app [] "zig2nix \"$@\""; # nix run .#zig2nix
 
       devShells.default = env.mkShell { # nix develop
-        buildInputs = [ zls ];
+        buildInputs = [ zls env.pkgs.nodePackages.npm env.pkgs.nodejs_25 env.pkgs.python314Packages.lizard ];
         nativeBuildInputs = [
           env.pkgs.wayland-scanner
           env.pkgs.xorg.libX11

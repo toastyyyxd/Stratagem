@@ -4,7 +4,6 @@ zig-cache/
 zig-out/
 .env
 .direnv/
-.continue/
-.kilocode/
 node_modules/
 src/_simd_archive
+zig-pkg/
