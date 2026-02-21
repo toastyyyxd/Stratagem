@@ -1,10 +1,12 @@
 const std = @import("std");
 const Writer = std.Io.Writer;
 
+const WRITER_BUFFER_SIZE = 65536;
+
 pub fn generateDecl(comptime target_name: []const u8, comptime T: type) []const u8 {
     comptime {
-        var buffer: [65536]u8 = undefined;
-        var writer: Writer = .fixed(&buffer);
+        var buffer: [WRITER_BUFFER_SIZE]u8 = undefined;
+        var writer = Writer.fixed(&buffer);
 
         writer.print("pub const {s} = ", .{target_name}) catch @compileError("Buffer overflow");
         writeType(&writer, T, 0) catch |e| {
@@ -25,30 +27,46 @@ fn isIdentChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '_';
 }
 
+/// - `std.array.List` > `List`
+/// - `*const std.mem.Slice` > `*const Slice`  
+/// - `?i32` > `?i32`
+/// - `*.` > `*.`
 fn writeCleanName(writer: *Writer, comptime name: []const u8) !void {
     var i: usize = 0;
     while (i < name.len) {
-        // write all symbol characters
-        if (!isIdentChar(name[i])) {
-            try writer.writeAll(name[i .. i + 1]);
+        const c = name[i];
+        // keep non-symbol characters
+        if (!isIdentChar(c)) {
+            try writer.writeByte(c);
             i += 1;
             continue;
         }
-        // get dots and spaces
-        const start = i;
-        var last_dot: ?usize = null;
-        while (i < name.len and (isIdentChar(name[i]) or name[i] == '.' or name[i] == ' ')) {
-            if (name[i] == '.') last_dot = i;  // Track last dot for path stripping
+        // start of a symbol
+        const segment_start = i;
+        while (i < name.len) {
+            const ch = name[i];
+            if (!isIdentChar(ch) and ch != '.' and ch != ' ') break;
             i += 1;
         }
-        if (last_dot) |dot| { // emit only the final segment;
-            var start_idx = dot + 1;
-            while (start_idx < i and name[start_idx] == ' ') start_idx += 1; // trim spaces
-            try writer.writeAll(name[start_idx..i]); 
-        } else { // no segments, emit entire thing
-            try writer.writeAll(name[start..i]); 
-        }
+        // get the last symbol
+        const segment = name[segment_start..i];
+        const final_name = finalName(segment);
+        try writer.writeAll(final_name);
     }
+}
+
+/// - `std.array.List` > `List`
+/// - `some_file_or_struct_symbol__1234 List` > `List`
+fn finalName(segment: []const u8) []const u8 {
+    // find the last dot to split off the final component
+    if (std.mem.lastIndexOfScalar(u8, segment, '.')) |dot_idx| {
+        var start = dot_idx + 1;
+        // skip any spaces immediately after the dot
+        while (start < segment.len and segment[start] == ' ') start += 1;
+        return segment[start..];
+    }
+    // no dot, return the segment with surrounding spaces trimmed
+    return std.mem.trim(u8, segment, " ");
 }
 
 fn getComptimeValue(comptime T: type, comptime ptr: *const anyopaque) T {
@@ -297,7 +315,7 @@ fn writeUnion(writer: *Writer, comptime u: std.builtin.Type.Union, comptime leve
         try writeIndent(writer, level + 1);
         try writer.print("{s}: ", .{field.name});
         try writeType(writer, field.type, level + 2);
-        if (field.alignment != @alignOf(field.type)) try writer.print(" align({})", .{field.alignment});
+        if (field.alignment != @alignOf(field.type)) try writer.print(" align({d})", .{field.alignment});
         try writer.writeAll(",\n");
     }
     try writeIndent(writer, level);
@@ -356,8 +374,13 @@ pub fn writeValue(writer: *Writer, comptime T: type, comptime val: T, comptime l
                 try writer.print("\"{s}\"", .{val});
                 return;
             }
-            try writer.writeAll("&");
-            try writeValue(writer, p.child, val.*, level + 1);
+            if (p.size == .one) {
+                try writer.writeAll("&");
+                try writeValue(writer, p.child, val.*, level + 1);
+            } else {
+                // Handle slices, many, c pointers differently
+                try writer.print("<pointer to {s}>", .{writeType(writer, p.child, level + 1)});
+            }
         },
         .@"fn" => |f| {
             try writer.writeAll("<naked ");
