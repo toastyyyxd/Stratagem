@@ -35,7 +35,7 @@ const Role = enum {
     producer,
     consumer,
     pub fn isMulti(comptime self: Role, comptime config: Config) bool {
-        return if (config.ordering == .fifo) false else switch (config.concurrency) {
+        return if (config.ordering == .unordered) false else switch (config.concurrency) {
             .mpmc => true,
             .mpsc => self == .producer,
             .spmc => self == .consumer,
@@ -85,7 +85,7 @@ fn InSoA(fields: []const Field, comptime Generic: *const fn (T: type) type) type
 }
 
 // config
-const Config = struct {
+pub const Config = struct {
     Item: type,
     structure: Structure,
     concurrency: Concurrency,
@@ -254,10 +254,10 @@ pub fn RingBuffer(comptime config: Config) type {
         fn offsetEnd(capacity: u64) usize {
             return offsetAfterBuffers(capacity);
         }
-        fn sizeOf(capacity: u64) usize {
+        pub fn sizeOf(capacity: u64) usize {
             return offsetEnd(capacity);
         }
-        fn alignOf() usize {
+        pub fn alignOf() usize {
             var max: usize = @alignOf(Self);
             if (config.ordering == .unordered) max = @max(max, @alignOf(u64));
             for (item_fields) |item_field| {
