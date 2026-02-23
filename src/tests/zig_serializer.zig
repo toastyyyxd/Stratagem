@@ -127,7 +127,10 @@ test "try to generate declaration from some vomit of a type - should match expec
         \\    cc: struct {
         \\        foo: u32,
         \\        bar: []const u8,
-        \\    } = .{ .foo = 123, .bar = "stratageming it" },
+        \\    } = .{
+        \\        .foo = 123,
+        \\        .bar = "stratageming it",
+        \\    },
         \\    dd: [3]enum {
         \\        one,
         \\        two,
@@ -140,10 +143,9 @@ test "try to generate declaration from some vomit of a type - should match expec
         \\        b: bool,
         \\    } = .{ .b = true },
         \\};
-        \\
     ;
 
     comptime {
-        try std.testing.expectEqualStrings(expected, serializer.generateDecl("Hammer", TestItems.Hammer));
+        try std.testing.expectEqualStrings(expected, serializer.generateDecl("Hammer", TestItems.Hammer, .{}));
     }
 }

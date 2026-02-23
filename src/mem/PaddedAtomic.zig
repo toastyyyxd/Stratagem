@@ -9,14 +9,15 @@ pub fn PaddedAtomic(T: type) type {
 
     // Round up to nearest multiple of effective_align
     const padded_size = ((t_size + effective_align - 1) / effective_align) * effective_align;
+    const padding_size = padded_size - t_size;
 
     return struct {
         value: AtomicT align(effective_align),
-        _padding: [padded_size - t_size]u8,
+        _padding: [padding_size]u8,
         pub inline fn init(value: T) @This() {
             return .{
                 .value = .init(value),
-                ._padding = undefined,
+                ._padding = [_]u8{ 0 } ** padding_size,
             };
         }
     };
