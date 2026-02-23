@@ -96,19 +96,19 @@ const Config = struct {
 };
 
 pub fn RingBuffer(comptime config: Config) type {
-    const item_fields_len = switch (config.structure) {
+    const comptime_item_fields_len = switch (config.structure) {
         .aos => 1,
         .soa => @typeInfo(config.Item).@"struct".fields.len,
     };
-    assert(item_fields_len > 0);
+    assert(comptime_item_fields_len > 0);
 
-    comptime var item_fields: [item_fields_len]Field = undefined;
+    comptime var comptime_item_fields: [comptime_item_fields_len]Field = undefined;
     if (config.structure == .aos) {
-        item_fields[0] = .{ .name = "array", .FieldType = config.Item, .size = @sizeOf(config.Item), .alignment = @alignOf(config.Item) };
+        comptime_item_fields[0] = .{ .name = "array", .FieldType = config.Item, .size = @sizeOf(config.Item), .alignment = @alignOf(config.Item) };
     } else {
         const struct_fields = @typeInfo(config.Item).@"struct".fields;
         for (struct_fields, 0..) |f, i| {
-            item_fields[i] = .{ .name = f.name, .FieldType = f.type, .size = @sizeOf(f.type), .alignment = @alignOf(f.type) };
+            comptime_item_fields[i] = .{ .name = f.name, .FieldType = f.type, .size = @sizeOf(f.type), .alignment = @alignOf(f.type) };
         }
     }
 
@@ -128,7 +128,7 @@ pub fn RingBuffer(comptime config: Config) type {
             "ExternalMutable",
             switch (config.structure) {
                 .aos => SliceMutable(config.Item),
-                .soa => InSoA(&item_fields, &SliceMutable),
+                .soa => InSoA(&comptime_item_fields, &SliceMutable),
             },
             .{},
         ),
@@ -136,7 +136,7 @@ pub fn RingBuffer(comptime config: Config) type {
             "ExternalImmutable",
             switch (config.structure) {
                 .aos => SliceImmutable(config.Item),
-                .soa => InSoA(&item_fields, &SliceImmutable),
+                .soa => InSoA(&comptime_item_fields, &SliceImmutable),
             },
             .{},
         ),
@@ -144,24 +144,30 @@ pub fn RingBuffer(comptime config: Config) type {
             "Internal",
             switch (config.structure) {
                 .aos => View(config.Item),
-                .soa => InSoA(&item_fields, &View),
+                .soa => InSoA(&comptime_item_fields, &View),
             },
             .{},
         ),
     }));
 
-    const aligned_counter_size = mem.alignForward(usize, @sizeOf(atomic.Value(u64)), atomic.cache_line);
-    comptime var counters_len: usize = 0;
+    const comptime_aligned_counter_size = mem.alignForward(usize, @sizeOf(atomic.Value(u64)), atomic.cache_line);
+    comptime var comptime_counters_len: usize = 0;
     const possible_states = std.meta.tags(State);
     for (std.meta.tags(Role)) |role| {
         if (role.isMulti(config)) {
-            counters_len += possible_states;
+            comptime_counters_len += possible_states;
         } else {
-            counters_len += 1;
+            comptime_counters_len += 1;
         }
     }
 
     return struct {
+        // hoist comptime into scope
+        const item_fields_len = comptime_item_fields_len;
+        const item_fields = comptime_item_fields;
+        const aligned_counter_size = comptime_aligned_counter_size;
+        const counters_len = comptime_counters_len;
+        
         // typing
         const Self = @This();
         const Item = config.Item;
