@@ -155,7 +155,7 @@ pub fn RingBuffer(comptime config: Config) type {
     const possible_states = std.meta.tags(State);
     for (std.meta.tags(Role)) |role| {
         if (role.isMulti(config)) {
-            comptime_counters_len += possible_states;
+            comptime_counters_len += possible_states.len;
         } else {
             comptime_counters_len += 1;
         }
