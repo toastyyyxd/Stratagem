@@ -15,20 +15,7 @@
     in with builtins; with env.pkgs.lib; rec {
       packages.foreign = env.package { # Clean binaries for shipping outside nix
         src = cleanSource ./.;
-        nativeBuildInputs = with env.pkgs; [
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXext
-          xorg.libXi
-          xorg.libXinerama
-          xorg.libXrandr
-          xorg.libXrender
-          libGL
-          wayland
-          libxkbcommon
-          egl-wayland
-          gdb
-        ]; # Packages for compiling
+        nativeBuildInputs = with env.pkgs; []; # Packages for compiling
         buildInputs = with env.pkgs; []; # Packages for linking
         zigPreferMusl = true; # Smaller binaries, avoids shipping glibc
       };
@@ -51,21 +38,8 @@
       apps.zig2nix = env.app [] "zig2nix \"$@\""; # nix run .#zig2nix
 
       devShells.default = env.mkShell { # nix develop
-        buildInputs = [ zls env.pkgs.nodePackages.npm env.pkgs.nodejs_25 env.pkgs.python314Packages.lizard ];
-        nativeBuildInputs = [
-          env.pkgs.wayland-scanner
-          env.pkgs.xorg.libX11
-          env.pkgs.xorg.libXcursor
-          env.pkgs.xorg.libXext
-          env.pkgs.xorg.libXi
-          env.pkgs.xorg.libXinerama
-          env.pkgs.xorg.libXrandr
-          env.pkgs.xorg.libXrender
-          env.pkgs.libGL
-          env.pkgs.wayland
-          env.pkgs.libxkbcommon
-          env.pkgs.egl-wayland
-        ] # Packages for compiling, linking and runtime
+        buildInputs = with env.pkgs; [ python314Packages.lizard gdb ] ++ [ zls ];
+        nativeBuildInputs = with env.pkgs; []
           ++ packages.default.nativeBuildInputs
           ++ packages.default.buildInputs
           ++ packages.default.zigWrapperBins
