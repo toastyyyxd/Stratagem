@@ -1,0 +1,3 @@
+[submodule "vendor/z-wgpu-native"]
+	path = vendor/z-wgpu-native
+	url = https://git.toastyx.dev/toasty/z-wgpu-native

@@ -1,7 +1,10 @@
 const std = @import("std");
 const rl = @import("raylib");
+const singletons = @import("./singletons.zig");
 
 pub fn main() !void {
+    singletons.init();
+
     // Game configuration
     const config = struct {
         pub const screen_width = 800;
