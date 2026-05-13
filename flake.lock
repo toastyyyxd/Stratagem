@@ -20,6 +20,22 @@
     },
     "nixpkgs": {
       "locked": {
+        "lastModified": 1778003029,
+        "narHash": "sha256-q/nkKLDtHIyLjZpKhWk3cSK5IYsFqtMd6UtXF3ddjgA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0c88e1f2bdb93d5999019e99cb0e61e1fe2af4c5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.11",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
         "lastModified": 1778643071,
         "narHash": "sha256-0nxOs3C7pUKYmiNB7iCRFe/6LLSur2FyQOx4iatyUYc=",
         "owner": "nixos",
@@ -33,7 +49,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_2": {
+    "nixpkgs_3": {
       "locked": {
         "lastModified": 1778430510,
         "narHash": "sha256-Ti+ZBvW6yrWWAg2szExVTwCd4qOJ3KlVr1tFHfyfi8Q=",
@@ -51,8 +67,10 @@
     },
     "root": {
       "inputs": {
+        "z-wgpu-native": "z-wgpu-native",
         "zig2nix": "zig2nix",
-        "zls-overlay": "zls-overlay"
+        "zigwin32gen": "zigwin32gen",
+        "zls-overlay": "zls-overlay_2"
       }
     },
     "systems": {
@@ -70,7 +88,51 @@
         "type": "github"
       }
     },
+    "z-wgpu-native": {
+      "inputs": {
+        "zig2nix": [
+          "zig2nix"
+        ],
+        "zls-overlay": "zls-overlay"
+      },
+      "locked": {
+        "lastModified": 1778695134,
+        "narHash": "sha256-UqMyY+ay1jkhmVsbBb1mUrKj4tcHJbH0YatXcFYkk3E=",
+        "ref": "refs/heads/main",
+        "rev": "845b0a591f86c695fcd9fc95a5a3fee0ad09dafb",
+        "revCount": 28,
+        "submodules": true,
+        "type": "git",
+        "url": "https://git.toastyx.dev/toasty/z-wgpu-native.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://git.toastyx.dev/toasty/z-wgpu-native.git"
+      }
+    },
     "zig-flake": {
+      "inputs": {
+        "nixpkgs": [
+          "z-wgpu-native",
+          "zls-overlay",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1778043693,
+        "narHash": "sha256-bXki1eB4/4tDKzkASk036jGRLE1RyQkxKWcT4mPoCO4=",
+        "owner": "silversquirl",
+        "repo": "zig-flake",
+        "rev": "571f9f364b2b5555ba8c155806f39545bca71997",
+        "type": "github"
+      },
+      "original": {
+        "owner": "silversquirl",
+        "repo": "zig-flake",
+        "type": "github"
+      }
+    },
+    "zig-flake_2": {
       "inputs": {
         "nixpkgs": [
           "zls-overlay",
@@ -94,7 +156,7 @@
     "zig2nix": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs_2"
       },
       "locked": {
         "lastModified": 1778643866,
@@ -110,10 +172,45 @@
         "type": "github"
       }
     },
+    "zigwin32gen": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776714449,
+        "narHash": "sha256-oK2M+7JWGbXi6tLt4G+4nz2a435m6RS2qpMoEkhXJCo=",
+        "owner": "marlersoft",
+        "repo": "zigwin32gen",
+        "rev": "c6dd1341a0e2b9325e4f4787e1dc310262e28c92",
+        "type": "github"
+      },
+      "original": {
+        "owner": "marlersoft",
+        "repo": "zigwin32gen",
+        "type": "github"
+      }
+    },
     "zls-overlay": {
       "inputs": {
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs",
         "zig-flake": "zig-flake"
+      },
+      "locked": {
+        "lastModified": 1778162772,
+        "narHash": "sha256-P9xzqmPR1iq/iY8YKVbrhC0cICxL6UroKraECNLNxFc=",
+        "owner": "zigtools",
+        "repo": "zls",
+        "rev": "f298676494808ce800d4e805e510e31f3cbd7335",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zigtools",
+        "repo": "zls",
+        "type": "github"
+      }
+    },
+    "zls-overlay_2": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_3",
+        "zig-flake": "zig-flake_2"
       },
       "locked": {
         "lastModified": 1778621944,

@@ -1,3 +1,6 @@
 [submodule "vendor/z-wgpu-native"]
 	path = vendor/z-wgpu-native
 	url = https://git.toastyx.dev/toasty/z-wgpu-native
+[submodule "vendor/zigwin32gen"]
+	path = vendor/zigwin32gen
+	url = https://github.com/marlersoft/zigwin32gen

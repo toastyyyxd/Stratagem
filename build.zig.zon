@@ -25,16 +25,12 @@
     // on the following line intact, so that it shows up in code reviews that
     // modify the field.
     .dependencies = .{
-        .raylib_zig = .{
-            .url = "git+https://github.com/toastyyyxd/raylib-zig.git#163b1ef2e993fe7cc7c76bb3213d98612f4b7676",
-            .hash = "raylib_zig-5.6.0-dev-KE8REGNJBQDSjjyCmf4ATVQtk_OaBpY0B7kBxwSOPEGZ",
-        },
     },
     .fingerprint = 0xe35e00df11111111, // Changing this has security and trust implications.
 
     // Tracks the earliest Zig version that the package considers to be a
     // supported use case.
-    .minimum_zig_version = "0.15.0-dev.1254",
+    .minimum_zig_version = "0.17.0-dev.296",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
