@@ -28,4 +28,132 @@ let
       '';
 in
 linkFarm name [
+  {
+    name = "zlib-1.3.1-1-ZZQ7ldENAAA7qJjUXP6E6xnRuV-jDL9dyoJFc_eb3zQ6.tar.gz";
+    path = fetchZig {
+      name = "libz";
+      url = "https://github.com/allyourcodebase/zlib/archive/c5115f4b69ef660f72a835c6638f80508ef284c7.tar.gz";
+      hash = "sha256-LXTzZptvs9dHFNndYCV+PjlTtmTn8O7BtLLJQ6Ul18c=";
+    };
+  }
+  {
+    name = "N-V-__8AAB0eQwD-0MdOEBmz7intriBReIsIDNlukNVoNu6o.tar.gz";
+    path = fetchZig {
+      name = "zlib";
+      url = "https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz";
+      hash = "sha256-r+38IdpUhv5xJKjejPSW+RLa+43nQ8ndkhmB0IR0gek=";
+    };
+  }
+  {
+    name = "mbedtls-3.6.4-E4NUR2wWAAAUSvVbho9aaU31-e4D8glu9l1VfxKezBkV.tar.gz";
+    path = fetchZig {
+      name = "mbedtls";
+      url = "git+https://github.com/allyourcodebase/mbedtls#3aa71a19acc173ae57b6a1114d62f2fdfd22960c";
+      hash = "sha256-OZcR+og5zI2Dj7BKNTwXOuZhUoOt2kTvGz+Vs4KTMdc=";
+    };
+  }
+  {
+    name = "N-V-__8AADE9jALWhPS2ykOLbf8gUmr9r-SBwyzzpccbtBAv.tar.gz";
+    path = fetchZig {
+      name = "mbedtls";
+      url = "git+https://github.com/Mbed-TLS/mbedtls.git?ref=v3.6.4#c765c831e5c2a0971410692f92f7a81d6ec65ec2";
+      hash = "sha256-3dl60lE48i76yj/HzZPcXzwro8eR/0Rv6qKw+RISTuM=";
+    };
+  }
+  {
+    name = "openssl-3.3.2-TC9C3Ze3ZABaKR5hc8KRnRPhTClKrKQKqTnXTUYkvmSR.tar.gz";
+    path = fetchZig {
+      name = "openssl";
+      url = "git+https://github.com/allyourcodebase/openssl#0ac677650d43eadf669067d050992118b13338d2";
+      hash = "sha256-vkkxrQBlhdu4bmsXEAIgi6W34vO8Wp4UfwMZid20LOU=";
+    };
+  }
+  {
+    name = "N-V-__8AAB4K3gN87j2XVRV4lWznICWpINb_g79iOtl4Cl30.tar.gz";
+    path = fetchZig {
+      name = "openssl";
+      url = "git+https://github.com/openssl/openssl?ref=openssl-3.3.2#fb7fab9fa6f4869eaa8fbb97e0d593159f03ffe4";
+      hash = "sha256-5dYzo+BCsqD/xlN2ibzj6or0nQUoRGBPGeD5sGAkhwE=";
+    };
+  }
+  {
+    name = "libressl-4.0.0--kqV4KPTAACsSRP8mSIZmqgVa5OZjw6WEgvcftWkLu-c.tar.gz";
+    path = fetchZig {
+      name = "libressl";
+      url = "git+https://github.com/allyourcodebase/libressl#43f34e823bddea90329e4475bb9c4f9d05e8542a";
+      hash = "sha256-n0H1JIne5vjqdwMyDT173uxYcDCG407WgDSPWgwwRg4=";
+    };
+  }
+  {
+    name = "N-V-__8AAGvDTQHGV38aqRN9PCALgEg4_XExU4juxdTJMTVQ.tar.gz";
+    path = fetchZig {
+      name = "libressl";
+      url = "https://github.com/libressl/portable/releases/download/v4.0.0/libressl-4.0.0.tar.gz";
+      hash = "sha256-3WmBh7IeC5Y1pK6QXAI33DoAJHN4n6ehH8I7mmNOt9E=";
+    };
+  }
+  {
+    name = "libmp3lame-3.100.1-6-67wlF1qxEwBuTD-o_MpTmmvE59MXo4cPfuki50pcdVgx.tar.gz";
+    path = fetchZig {
+      name = "libmp3lame";
+      url = "https://github.com/andrewrk/libmp3lame/archive/6f1676b9784fc2e00821bf8322cd489adf767a57.tar.gz";
+      hash = "sha256-nhTGU9u1f/sAkYDMj5fUGkuS3DD7MnYHV47vYxSfDHo=";
+    };
+  }
+  {
+    name = "libvorbis-0.0.0+1.3.7-1wt9j_QPAADVure94TG4ecBMLD8eIAzWd6ZxVOmBBPCu.tar.gz";
+    path = fetchZig {
+      name = "libvorbis";
+      url = "git+https://codeberg.org/allyourcodebase/libvorbis#410cdd66bd207aef0d248475dbed3cf7ca1eb9d4";
+      hash = "sha256-laQxkZ/ZNOeVDauvF2Qbojte7GAUuRXTPoAXAzOlHAg=";
+    };
+  }
+  {
+    name = "N-V-__8AAA7lSAA6p7eRmPGVeA9uHmeiJ2DX-ISiPliRJ8Y7.tar.gz";
+    path = fetchZig {
+      name = "libvorbis";
+      url = "https://github.com/xiph/vorbis/archive/e3c9861ff096d52378e131ff8c334552e09cdffa.tar.gz";
+      hash = "sha256-6BCc01rV1DACdNMzGkdhyULzVkile0EkChF7wrymROU=";
+    };
+  }
+  {
+    name = "libogg-0.0.0+1.3.7-0KP-foYNAAAaj0YJOwRQs7kTN-ivzRMYTjtKzr6Apelj.tar.gz";
+    path = fetchZig {
+      name = "libogg";
+      url = "git+https://codeberg.org/allyourcodebase/libogg#4accc2e0c6710e07a5070ac3bf0a9a319f9da6a6";
+      hash = "sha256-FU4+hAmBCwqbDEBLerFpOQucs/gs/mm6l5GhY57GSNk=";
+    };
+  }
+  {
+    name = "N-V-__8AAFM3CwD6iAA1kggMPR8NHZ8VTb2zvRZ1Mt4BUfq9.tar.gz";
+    path = fetchZig {
+      name = "libogg";
+      url = "https://github.com/xiph/ogg/archive/06a5e0262cdc28aa4ae6797627a783b5010440f0.tar.gz";
+      hash = "sha256-c2qeQmZ9f4D6Syz/fa4coHD1JNz5nc2SyZ5zhtjXCXs=";
+    };
+  }
+  {
+    name = "nasm-3.0.1-B_NnpQpTAAA25UxvqONakXtmj-a78PGe3xfgyDFgetb0.tar.gz";
+    path = fetchZig {
+      name = "nasm";
+      url = "git+https://github.com/allyourcodebase/nasm.git#d7356eadb2d7771542fe74e8fc0668bd78732b59";
+      hash = "sha256-8a6ByK+/yV6Q1Qfib+R5VycenUhIHuydRdNRSXc8xa8=";
+    };
+  }
+  {
+    name = "N-V-__8AAEAMKAFrNesgN6ZM9sxj37fq_i7UJe5nKkLmyRJI.tar.gz";
+    path = fetchZig {
+      name = "nasm";
+      url = "https://www.nasm.us/pub/nasm/releasebuilds/3.01/nasm-3.01.tar.gz";
+      hash = "sha256-a16+1uBXmvsJ1Z18oBwN3VTPfwqpjKOO+o1ax+Ofwp8=";
+    };
+  }
+  {
+    name = "diffz-0.0.1-G2tlISvOAQDORzPTSxDgiKwlHuADKeJMdJrw4kRfLufj.tar.gz";
+    path = fetchZig {
+      name = "diffz";
+      url = "git+https://github.com/ziglibs/diffz.git#aac8aa99c436ab8277b0711922aad062c0167b12";
+      hash = "sha256-gegtURdsPajDkn9QTYS3na2HXHxvAYDexGYRJzB5Nrs=";
+    };
+  }
 ]

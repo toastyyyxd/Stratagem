@@ -24,7 +24,10 @@
     // original project's identity. Thus it is recommended to leave the comment
     // on the following line intact, so that it shows up in code reviews that
     // modify the field.
-    .dependencies = .{
+    .dependencies = .{ .z_wgpu_native = .{ .path = "./.nix-deps/z_wgpu_native" }, .zigwin32 = .{ .path = "./.nix-deps/zigwin32" }, .diffz = .{
+            .url = "git+https://github.com/ziglibs/diffz.git#aac8aa99c436ab8277b0711922aad062c0167b12",
+            .hash = "diffz-0.0.1-G2tlISvOAQDORzPTSxDgiKwlHuADKeJMdJrw4kRfLufj",
+        },
     },
     .fingerprint = 0xe35e00df11111111, // Changing this has security and trust implications.
 

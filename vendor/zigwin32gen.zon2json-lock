@@ -1,7 +1,12 @@
 {
-  "N-V-__8AAGPG7AO50VI-Po_HVpd_4i0gFRAc9_PoDGpDYg1v": {
-    "name": "win32json",
-    "url": "git+https://github.com/marlersoft/win32json#ca9dd560f598062be334f4b5687764a85de1416c",
-    "hash": "sha256-z9BS4IZx+ic4oHPsr8wrmJizdJj6Ne3+alE5fJnLAds="
+  "winmd-0.0.0-2QIrG4MpAQCCh0ReC0jZKAps9Frn3jbbR--W7szyGAOS": {
+    "name": "winmd",
+    "url": "git+https://github.com/marler8997/winmd-zig#d0d8daff01b4fb1a6324c79a855c34ced5bbc8d2",
+    "hash": "sha256-2brTNf5tkTUR+ol9jOpS56kziuEL8wwaXkel8Pih7yo="
+  },
+  "zipcmdline-0.0.0-DFii07hmAwCFNhtMpml64Pj_hr8kN4WesClygZErQHsk": {
+    "name": "zipcmdline",
+    "url": "git+https://github.com/marler8997/zipcmdline#a6de65875023c52d2f56f21a31c6487266f8105f",
+    "hash": "sha256-C4Qph7dS00Kp+FxPKO8CWGPLdVouBcOGWVga8NhgoO8="
   }
 }
