@@ -7,3 +7,4 @@ zig-out/
 node_modules/
 src/_simd_archive
 zig-pkg/
+.nix-deps/
