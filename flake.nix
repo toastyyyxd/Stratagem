@@ -14,7 +14,7 @@
 
     # TODO: switch back to git+https://git.toastyx.dev/toasty/z-wgpu-native.git
     # (with ?ref=...) once the zig-0.18 migration branch is pushed/merged.
-    z-wgpu-native.url = "git+file:///home/toasty/z-wgpu-native?ref=migrate/zig-0.18";
+    z-wgpu-native.url = "git+file:///home/toasty/z-wgpu-native?ref=main";
 
     zigwin32gen.url = "github:marlersoft/zigwin32gen";
     zigwin32gen.flake = false;

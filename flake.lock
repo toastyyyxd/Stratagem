@@ -225,17 +225,17 @@
         "zls-overlay": "zls-overlay"
       },
       "locked": {
-        "lastModified": 1794860255,
+        "lastModified": 1794863711,
         "narHash": "sha256-YFgTyUQSkyUcorsHsbl5AzCABVTRugeH5ZWdS9/3V/o=",
-        "ref": "migrate/zig-0.18",
-        "rev": "d98aae3b6717c054e7e319382ffc62708cf0df38",
+        "ref": "main",
+        "rev": "cb455fce55fd5321200eb190fb8e176ae1d522f0",
         "revCount": 33,
         "submodules": true,
         "type": "git",
         "url": "file:///home/toasty/z-wgpu-native"
       },
       "original": {
-        "ref": "migrate/zig-0.18",
+        "ref": "main",
         "type": "git",
         "url": "file:///home/toasty/z-wgpu-native"
       }
