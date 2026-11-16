@@ -42,7 +42,7 @@ const TestItems = struct {
         p: @Vector(4, f32),
         q: @TypeOf(.this_should_be_an_enum_literal),
         // nested packed and tuples
-        r: packed struct(u32) {
+        r: bitpack struct(u32) {
             tag: u8,
             data: u24,
         },
@@ -107,7 +107,7 @@ test "try to generate declaration from some vomit of a type - should match expec
         \\    },
         \\    p: @Vector(4, f32),
         \\    q: @TypeOf(.enum_literal),
-        \\    r: packed struct(u32) {
+        \\    r: bitpack struct(u32) {
         \\        tag: u8,
         \\        data: u24,
         \\    },

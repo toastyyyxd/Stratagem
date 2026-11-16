@@ -2,7 +2,7 @@ const std = @import("std");
 const Conduit = @import("../mem/Conduit.zig").Conduit;
 const View = @import("../mem/Conduit.zig").View;
 
-const Payload = packed struct(u128) {
+const Payload = bitpack struct(u128) {
     /// The context to be passed to the tick function.
     /// Usually a pointer to the FSM that this job acts as a VTable for.
     ctx: usize,

@@ -223,9 +223,9 @@ fn writeStruct(self: *Self, comptime s: std.builtin.Type.Struct) !void {
     const layout = switch (s.layout) {
         .auto => "struct",
         .@"extern" => "extern struct",
-        .@"packed" => "packed struct",
+        .@"bitpack" => "bitpack struct",
     };
-    if (s.layout == .@"packed") {
+    if (s.layout == .@"bitpack") {
         if (s.backing_integer) |BI| {
             try self.writer.print("{s}(", .{layout});
             try self.writeType(BI);
@@ -243,7 +243,7 @@ fn writeStruct(self: *Self, comptime s: std.builtin.Type.Struct) !void {
         try self.writer.print("{s}: ", .{name});
         try self.writeType(ft);
 
-        const def_align = if (s.layout == .@"packed") 0 else @alignOf(ft);
+        const def_align = if (s.layout == .@"bitpack") 0 else @alignOf(ft);
         if (attrs.@"align") |ali| if (ali != def_align) try self.writer.print(" align({d})", .{ali});
 
         if (attrs.default_value_ptr) |ptr| {
@@ -355,7 +355,7 @@ fn writeUnion(self: *Self, comptime u: std.builtin.Type.Union) !void {
     const layout = switch (u.layout) {
         .auto => "union",
         .@"extern" => "extern union",
-        .@"packed" => "packed union",
+        .@"bitpack" => "bitpack union",
     };
 
     if (u.tag_type) |Tag| {

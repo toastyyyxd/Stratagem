@@ -6,16 +6,15 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     zig2nix.url = "github:cloudef/zig2nix";
-    
-    # Custom zig source from your branch
-    zig-bsp.url = "git+https://git.toastyx.dev/toasty/zig-bsp-cherrypick.git?ref=bsp";
-    zig-bsp.flake = false;
 
-    # Use ZLS's own flake, pointed at the specific branch
-    zls-overlay.url = "github:zigtools/zls/techatrix/build-runner-process";
+    # ZLS master now ships the build system protocol client (src/bsp.zig) and
+    # targets zig 0.18.0-dev, so no custom branch/patches are needed anymore.
+    zls-overlay.url = "github:zigtools/zls";
     zls-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-    z-wgpu-native.url = "git+https://git.toastyx.dev/toasty/z-wgpu-native.git";
+    # TODO: switch back to git+https://git.toastyx.dev/toasty/z-wgpu-native.git
+    # (with ?ref=...) once the zig-0.18 migration branch is pushed/merged.
+    z-wgpu-native.url = "git+file:///home/toasty/z-wgpu-native?ref=migrate/zig-0.18";
 
     zigwin32gen.url = "github:marlersoft/zigwin32gen";
     zigwin32gen.flake = false;
@@ -24,80 +23,74 @@
     rickroll.flake = false;
   };
 
-  outputs = { self, flake-utils, zig2nix, z-wgpu-native, zigwin32gen, rickroll, zig-bsp, zls-overlay, ... }: 
+  outputs = { self, flake-utils, zig2nix, z-wgpu-native, zigwin32gen, rickroll, zls-overlay, ... }:
     flake-utils.lib.eachDefaultSystem (system: let
-      
-      # Environment
-      # Build custom zig from source (bsp branch)
-      zig-bin = zig2nix.outputs.packages.${system}.zig-src-master.overrideAttrs (old: {
-        version = "0.17.0-dev.bsp";
-        src = zig-bsp;
-        cmakeFlags = old.cmakeFlags ++ [ "-DZIG_VERSION=0.17.0-dev.bsp" ];
-      });
 
+      # Environment
+      # Prebuilt nightly zig tracked by zig2nix (currently 0.18.0-dev.*).
+      # We used to build a custom fork from source; upstream master now has the
+      # build system protocol, so the plain nightly is what we want.
+      zig-bin = zig2nix.outputs.packages.${system}.zig-master;
+
+      # zigwin32gen still emits Zig 0.15-era code, so generate with 0.15.2.
       zig-0_15_2-bin = zig2nix.outputs.packages.${system}.zig-0_15_2;
 
       env = zig2nix.outputs.zig-env.${system} { zig = zig-bin; };
       env-0_15_2 = zig2nix.outputs.zig-env.${system} { zig = zig-0_15_2-bin; };
-      
+
       hostPkgs = env.pkgs;
       inherit (hostPkgs) lib;
 
-      # Universal patch script for Zig 0.17.0-dev compatibility
-      zig017PatchScript = ''
-        find . -name "*.zig" -exec sed -i -E \
-          -e 's/(\boptimize\b|\bmode\b)\s*==\s*\.ReleaseSmall\b/\1 == .small/g' \
-          -e 's/(\boptimize\b|\bmode\b)\s*==\s*\.ReleaseFast\b/\1 == .fast/g' \
-          -e 's/(\boptimize\b|\bmode\b)\s*==\s*\.ReleaseSafe\b/\1 == .safe/g' \
-          -e 's/(\boptimize\b|\bmode\b)\s*==\s*\.Debug\b/\1 == .debug/g' \
-          -e 's/\.\s*optimize\s*=\s*\.ReleaseSmall\b/.optimize = .small/g' \
-          -e 's/\.\s*optimize\s*=\s*\.ReleaseFast\b/.optimize = .fast/g' \
-          -e 's/\.\s*optimize\s*=\s*\.ReleaseSafe\b/.optimize = .safe/g' \
-          -e 's/\.\s*optimize\s*=\s*\.Debug\b/.optimize = .debug/g' \
-          {} +
-        
-        find . -name "*.zig" -exec sed -i -E 's/cTypeBitSize\((\.[a-z_]+)\)(\.\?)?/cTypeBitSize(\1).?/g' {} +
-      '';
-
-      # Helper to patch any source directory with the universal script
-      patchZigSrc = name: src: hostPkgs.runCommand name {} ''
-        cp -r ${src} $out
-        chmod -R u+w $out
-        cd $out
-        ${zig017PatchScript}
-      '';
-
-      z-wgpu-native-src = patchZigSrc "z-wgpu-native-patched" z-wgpu-native;
-
-      # Override ZLS to use our custom zig-bin and apply the universal patches
-      zls = zls-overlay.packages.${system}.zls.overrideAttrs (old: {
-        # Force our custom zig into the build environment
-        nativeBuildInputs = [ zig-bin ];
-        
-        # Skip the test suite because the bsp branch broke enum casing and LSP types
-        doCheck = false;
-        
-        # Apply universal patches, plus bypass the ZLS version check
-        postPatch = (old.postPatch or "") + zig017PatchScript + ''
-          sed -i 's/0.17.0-dev.387+31f157d80/0.0.0/g' build.zig build.zig.zon
-        '';
-      });
+      zls = zls-overlay.packages.${system}.zls;
 
       # Dependencies
       z-wgpu-native-pkg = z-wgpu-native.packages.${system}.default;
-      depsBuildInputs = z-wgpu-native-pkg.buildInputs ++ [ hostPkgs.hwloc ];
-      depsNativeBuildInputs = z-wgpu-native-pkg.nativeBuildInputs ++ [ hostPkgs.pkg-config ];
+      depsBuildInputs = z-wgpu-native-pkg.buildInputs ++ [ hostPkgs.hwloc hostPkgs.cpu_features ];
 
-      zigwin32 = env-0_15_2.package {
+      # `cpu_features` ships no pkg-config file and zig's build system resolves
+      # `linkSystemLibrary` through pkg-config, so synthesise one.
+      cpuFeaturesPc = hostPkgs.runCommand "cpu_features-pkgconfig" {} ''
+        mkdir -p $out/lib/pkgconfig
+        cat > $out/lib/pkgconfig/cpu_features.pc <<'EOF'
+        prefix=@prefix@
+        includedir=@includedir@
+        libdir=@libdir@
+
+        Name: cpu_features
+        Description: cpu_features
+        Version: @version@
+        Cflags: -I''${includedir}
+        Libs: -L''${libdir} -lcpu_features
+        EOF
+        substituteInPlace $out/lib/pkgconfig/cpu_features.pc \
+          --replace-fail @prefix@ "${hostPkgs.cpu_features}" \
+          --replace-fail @includedir@ "${hostPkgs.cpu_features.dev}/include" \
+          --replace-fail @libdir@ "${hostPkgs.cpu_features}/lib" \
+          --replace-fail @version@ "${hostPkgs.cpu_features.version}"
+      '';
+
+      # NB: don't inherit z-wgpu-native's nativeBuildInputs here: that drags in
+      # rust/cargo hooks which run against this pure-Zig derivation and fail at
+      # unpack with an unset cargoDeps.
+      depsNativeBuildInputs = [ hostPkgs.pkg-config cpuFeaturesPc ];
+
+      zigwin32Pkg = env-0_15_2.package {
         name = "zigwin32";
         src = zigwin32gen;
         nativeBuildInputs = with hostPkgs; [ cacert git curl ];
         zigBuildZonLock = ./vendor/zigwin32gen.zon2json-lock;
-        
+
+        # Fetches win32metadata from the network, hence fixed-output.
         outputHashMode = "recursive";
         outputHashAlgo = "sha256";
-        outputHash = "sha256-Xfp5wRP1UoLqVLhH1bWRBteNrSjR1RDomED0a9/42Wk="; # We will replace this after the first failure
-        
+        outputHash = "sha256-PGdU1nUOGu1QNSEqKOCstUDuMxj4c8FwYk4R16YKJY8=";
+
+        # Only the emitted flag-struct spelling can be patched here (this file
+        # runs under zig 0.15.2); the rest is retargeted in installPhase.
+        postPatch = ''
+          sed -i 's/packed struct/bitpack struct/g' src/genzig.zig
+        '';
+
         buildPhase = ''
           runHook preBuild
           zig build install
@@ -107,42 +100,58 @@
           runHook preInstall
           mkdir -p $out
           cp -r zig-out/* $out/
+          # Retarget the generated bindings at zig 0.18:
+          #  - `packed` was renamed to `bitpack`
+          #  - ambiguous operator precedence is an error
+          find $out -name '*.zig' -exec sed -i \
+            -e 's/packed struct/bitpack struct/g' \
+            -e 's/\.@"packed"/.@"bitpack"/g' {} +
+          sed -i 's|return @as(u8, @intCast(hexVal(hex\[0\]))) << 4 | return (@as(u8, @intCast(hexVal(hex[0]))) << 4) | ' $out/win32/zig.zig
           runHook postInstall
         '';
-      }; 
+      };
 
       # Packages
       packages = rec {
-        foreign = env.package { 
+        foreign = env.package {
           src = lib.cleanSource ./.;
           nativeBuildInputs = depsNativeBuildInputs;
           buildInputs = depsBuildInputs;
           zigPreferMusl = true;
           preBuild = ''
             mkdir -p .nix-deps
-            ln -sfn ${z-wgpu-native-src} .nix-deps/z_wgpu_native
-            ln -sfn ${zigwin32} .nix-deps/zigwin32
+            ln -sfn ${z-wgpu-native} .nix-deps/z_wgpu_native
+            ln -sfn ${zigwin32Pkg} .nix-deps/zigwin32
             ln -sfn ${rickroll} .nix-deps/rickroll.mp4
           '';
         };
 
+        zigwin32 = zigwin32Pkg;
+
         default = foreign.override (attrs: {
           zigPreferMusl = false;
+          # Pin the host glibc version, otherwise zig targets plain "gnu" and
+          # rejects the nixpkgs-built shared libraries newer symbol versions.
+          zigTarget = "${system}-gnu.${hostPkgs.stdenv.cc.libc.version}";
           zigWrapperBins = [];
           zigWrapperLibs = attrs.buildInputs or [];
         });
       };
 
       # Apps
+      # NB: pass the dependencies so `shell-runtime` exports PKG_CONFIG_PATH etc.;
+      # otherwise `nix run`/`nix build` can't resolve hwloc/cpu_features.
+      appDeps = depsBuildInputs ++ depsNativeBuildInputs;
+
       apps = {
         bundle = {
           type = "app";
           program = "${packages.foreign}/bin/default";
         };
-        default = env.app [] "zig build run -- \"$@\"";
-        build   = env.app [] "zig build \"$@\"";
-        test    = env.app [] "zig build test -- \"$@\"";
-        docs    = env.app [] "zig build docs -- \"$@\"";
+        default = env.app appDeps "zig build run -- \"$@\"";
+        build   = env.app appDeps "zig build \"$@\"";
+        test    = env.app appDeps "zig build test -- \"$@\"";
+        docs    = env.app appDeps "zig build docs -- \"$@\"";
         zig2nix = env.app [] "zig2nix \"$@\"";
       };
 
@@ -150,13 +159,15 @@
       devShells = {
         default = env.mkShell {
           buildInputs = packages.default.buildInputs;
-          nativeBuildInputs = with hostPkgs; [ 
-            python314Packages.lizard 
-            gdb 
-            zls 
-            zig-bin 
+          nativeBuildInputs = with hostPkgs; [
+            python314Packages.lizard
+            gdb
+            zls
+            zig-bin
             pkg-config
+            cpuFeaturesPc
             hwloc
+            cpu_features
           ] ++ packages.default.nativeBuildInputs
             ++ packages.default.zigWrapperBins
             ++ packages.default.zigWrapperLibs;
@@ -164,12 +175,11 @@
           shellHook = ''
             export ZIG_GLOBAL_CACHE_DIR="$PWD/.zig-cache"
             mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
-            #ln -sfn ${hostPkgs.callPackage ./build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
 
             mkdir -p .nix-deps
 
-            ln -sfn ${z-wgpu-native-src} .nix-deps/z_wgpu_native
-            ln -sfn ${zigwin32} .nix-deps/zigwin32
+            ln -sfn ${z-wgpu-native} .nix-deps/z_wgpu_native
+            ln -sfn ${zigwin32Pkg} .nix-deps/zigwin32
             ln -sfn ${rickroll} .nix-deps/rickroll.mp4
           '';
         };

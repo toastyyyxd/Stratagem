@@ -298,6 +298,7 @@ pub fn Conduit(comptime config: Config) type {
             for (item_fields) |item_field| {
                 max = @max(max, item_field.alignment);
             }
+            max = @max(max, atomic.cache_line);
             return max;
         }
         fn getCounter(self: *Self, comptime role: Role, comptime state: State) *atomic.Value(u64) {

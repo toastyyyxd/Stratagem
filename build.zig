@@ -39,6 +39,16 @@ pub fn build(b: *std.Build) !void {
     const hwloc = hwloc_translate_c.createModule();
     main_mod.addImport("hwloc", hwloc);
 
+    const cpu_feautures_translate_c = b.addTranslateC(.{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("src/utils/cpu_features_c.h"),
+        .link_libc = true,
+    });
+    cpu_feautures_translate_c.linkSystemLibrary("cpu_features", .{});
+    const cpu_features = cpu_feautures_translate_c.createModule();
+    main_mod.addImport("cpu_features", cpu_features);
+
     const exe = b.addExecutable(.{
         .name = "Stratagem",
         .root_module = main_mod,
@@ -58,7 +68,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/tests.zig"),
         .optimize = optimize,
         .target = target,
-        .link_libc = false,
+        .link_libc = true,
     });
     test_mod.linkLibrary(wgpu_artifact);
     test_mod.addImport("wgpu", wgpu);
