@@ -62,7 +62,6 @@ nix run .#default
   WIP, truncated expressions). Nothing imports them, so the build ignores them.
 - `apps.docs` (`zig build docs`) has no matching step in `build.zig`; it fails.
 - `src/mem/Conduit.zig.bak` is a backup file, still tracked.
-- `build.zig.zon` `minimum_zig_version` still says 0.17.0-dev.296.
 
 ## Verify
 
